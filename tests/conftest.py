@@ -8,6 +8,9 @@ from lyricmood.config import Settings
 from lyricmood.context import AppContext
 from lyricmood.core.cache import Cache
 from lyricmood.core.http import RetryPolicy
+from lyricmood.core.lastfm import LastfmClient
+from lyricmood.core.lrclib import LrclibClient
+from lyricmood.core.reccobeats import ReccoBeatsClient
 from lyricmood.core.spotify.client import API_BASE, SpotifyClient
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -66,3 +69,40 @@ def spotify_api():
 @pytest.fixture
 async def ctx(settings, cache, spotify) -> AppContext:
     return AppContext(settings, cache=cache, spotify=spotify)
+
+
+@pytest.fixture
+def router():
+    """One mock for all APIs; register routes with full URLs."""
+    with respx.mock(assert_all_called=False) as r:
+        yield r
+
+
+@pytest.fixture
+async def lrclib(cache):
+    client = LrclibClient(cache, user_agent="lyricmood-tests", rps=1000, retry=FAST_RETRY)
+    yield client
+    await client.aclose()
+
+
+@pytest.fixture
+async def lastfm(cache):
+    client = LastfmClient(
+        cache, api_key="test-key", user_agent="lyricmood-tests", rps=1000, retry=FAST_RETRY
+    )
+    yield client
+    await client.aclose()
+
+
+@pytest.fixture
+async def reccobeats(cache):
+    client = ReccoBeatsClient(cache, user_agent="lyricmood-tests", rps=1000, retry=FAST_RETRY)
+    yield client
+    await client.aclose()
+
+
+@pytest.fixture
+async def full_ctx(settings, cache, spotify, lrclib, lastfm, reccobeats) -> AppContext:
+    return AppContext(
+        settings, cache=cache, spotify=spotify, lrclib=lrclib, lastfm=lastfm, reccobeats=reccobeats
+    )

@@ -1,0 +1,55 @@
+{
+ "timestamp": 1761735000000,
+ "context": null,
+ "progress_ms": 83000,
+ "item": {
+  "album": {
+   "album_type": "album",
+   "id": "AAAAAAAAAAAAAAAAAAAAAA",
+   "name": "Once",
+   "release_date": "2004-06-07",
+   "release_date_precision": "day",
+   "images": [],
+   "type": "album",
+   "uri": "spotify:album:AAAAAAAAAAAAAAAAAAAAAA",
+   "artists": [
+    {
+     "id": "2NPduAUeLVsfIauhRwuft1",
+     "name": "Nightwish",
+     "type": "artist",
+     "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1"
+    }
+   ]
+  },
+  "artists": [
+   {
+    "id": "2NPduAUeLVsfIauhRwuft1",
+    "name": "Nightwish",
+    "type": "artist",
+    "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1",
+    "external_urls": {
+     "spotify": "https://open.spotify.com/artist/2NPduAUeLVsfIauhRwuft1"
+    }
+   }
+  ],
+  "disc_number": 1,
+  "duration_ms": 276000,
+  "explicit": false,
+  "external_ids": {
+   "isrc": "FIXTUREISRC01"
+  },
+  "external_urls": {
+   "spotify": "https://open.spotify.com/track/1pVuCVMH2Ex4ab4bNIpw6S"
+  },
+  "href": "https://api.spotify.com/v1/tracks/1pVuCVMH2Ex4ab4bNIpw6S",
+  "id": "1pVuCVMH2Ex4ab4bNIpw6S",
+  "is_local": false,
+  "name": "Nemo",
+  "track_number": 1,
+  "type": "track",
+  "uri": "spotify:track:1pVuCVMH2Ex4ab4bNIpw6S"
+ },
+ "currently_playing_type": "track",
+ "actions": {},
+ "is_playing": true
+}

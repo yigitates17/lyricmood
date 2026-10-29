@@ -1,0 +1,46 @@
+{
+ "toptracks": {
+  "track": [
+   {
+    "name": "Carnival of Rust",
+    "playcount": "3072722",
+    "listeners": "250834",
+    "artist": {
+     "name": "Poets of the Fall"
+    },
+    "@attr": {
+     "rank": "1"
+    }
+   },
+   {
+    "name": "Late Goodbye",
+    "playcount": "1298667",
+    "listeners": "136399",
+    "artist": {
+     "name": "Poets of the Fall"
+    },
+    "@attr": {
+     "rank": "2"
+    }
+   },
+   {
+    "name": "Sleep",
+    "playcount": "1222264",
+    "listeners": "124401",
+    "artist": {
+     "name": "Poets of the Fall"
+    },
+    "@attr": {
+     "rank": "3"
+    }
+   }
+  ],
+  "@attr": {
+   "artist": "Poets of the Fall",
+   "page": "1",
+   "perPage": "3",
+   "totalPages": "3665",
+   "total": "10995"
+  }
+ }
+}

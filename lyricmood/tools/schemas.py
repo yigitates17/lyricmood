@@ -17,13 +17,23 @@ class TrackOut(BaseModel):
 
     @classmethod
     def of(cls, track: Track) -> "TrackOut":
-        seconds = round(track.duration_ms / 1000)
         return cls(
             id=track.spotify_id,
             title=track.title,
             artists=", ".join(track.artists),
             album=track.album,
             year=(track.release_date or "")[:4] or None,
-            duration=f"{seconds // 60}:{seconds % 60:02d}",
+            duration=format_ms(track.duration_ms),
             isrc=track.isrc,
         )
+
+
+TRACK_ARG = (
+    "The song: a Spotify track ID/URL/URI (best: use `id` from search_track) or free text "
+    'like "Carnival of Rust Poets of the Fall".'
+)
+
+
+def format_ms(ms: int) -> str:
+    seconds = round(ms / 1000)
+    return f"{seconds // 60}:{seconds % 60:02d}"

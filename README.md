@@ -15,8 +15,9 @@ LLM client:
 
 Both read the same tool registry, so every tool is defined once.
 
-> **Status: milestone 1 of 7.** Project skeleton, config, SQLite cache,
-> Spotify login, and the `search_track` tool. See [Roadmap](#roadmap).
+> **Status: milestone 2 of 7.** Spotify search, lyrics (LRCLIB), audio
+> features (ReccoBeats), Last.fm tags, artist top tracks, and the song
+> you're playing now. See [Roadmap](#roadmap).
 
 ## Why this exists
 
@@ -90,9 +91,29 @@ The login asks for all the permissions lyricmood will eventually need (top
 tracks, saved tracks, reading and editing playlists, the currently playing
 song), so later milestones won't make you log in again.
 
-### Last.fm, YouTube, LLM keys
+### Last.fm (recommended)
 
-These come with milestones 2, 7 and 5. Each will get its own section here.
+Last.fm provides mood and genre tags, artist top tracks and, later, similar
+songs. Without a key, `get_track_profile` leaves out tags and
+`get_artist_tracks` falls back to Spotify's search order.
+
+1. Go to https://www.last.fm/api/account/create (log in or create a free
+   account).
+2. Fill in **Application name** (e.g. `lyricmood`). The other fields can
+   stay empty.
+3. Copy the **API key** (not the shared secret) into `.env`:
+   ```
+   LASTFM_API_KEY=your_key_here
+   ```
+
+### LRCLIB and ReccoBeats
+
+Neither needs a key. lyricmood sends a User-Agent that identifies it, as
+LRCLIB asks.
+
+### YouTube, LLM keys
+
+These come with milestones 7 and 5.
 
 ## Usage
 
@@ -103,6 +124,11 @@ uv run lyricmood tools --schema                 # ...with JSON input schemas
 uv run lyricmood call search_track query="nemo nightwish"
 uv run lyricmood call search_track query="artist:Nightwish" limit=10
 uv run lyricmood call search_track query="https://open.spotify.com/track/..."
+uv run lyricmood call get_track_profile track="Carnival of Rust Poets of the Fall"
+uv run lyricmood call get_lyrics track=2DtPEKs3Pj7E06EoWW4vw8
+uv run lyricmood call get_artist_tracks artist="Haloo Helsinki!" limit=5
+uv run lyricmood call now_playing                # play something on Spotify first
+uv run lyricmood call now_playing with_profile=false
 ```
 
 `call` runs any tool directly and prints exactly the JSON an LLM would get.
@@ -118,11 +144,37 @@ cache. Set `LYRICMOOD_DATA_DIR` to move it.
 | Tool | Milestone | Status |
 |---|---|---|
 | `search_track(query, limit)` | 1 | ✅ |
-| `get_artist_tracks`, `get_lyrics`, `get_track_profile`, `now_playing` | 2 | planned |
+| `get_lyrics(track)` | 2 | ✅ |
+| `get_track_profile(track)` | 2 | ✅ |
+| `get_artist_tracks(artist, limit)` | 2 | ✅ |
+| `now_playing(with_profile)` | 2 | ✅ |
 | `find_similar_by_lyrics`, `analyze_artists` | 3 | planned |
 | `get_my_top_tracks`, `get_saved_tracks` | 4–6 | planned |
 | `create_spotify_playlist`, `update_spotify_playlist`, `build_mood_playlist` | 6 | planned |
 | `convert_playlist` | 7 | planned |
+
+Every `track` argument takes a Spotify ID, URL or URI, or free text, which
+resolves to the top search hit.
+
+**`get_track_profile`** returns, in one call:
+
+- the lyrics (cut at a stanza boundary past 2,500 characters) and simple
+  stats. `repeated_lines` usually marks the chorus.
+- ReccoBeats audio features: valence (musical positivity), energy,
+  danceability, acousticness, tempo and key.
+- Last.fm tags. Last.fm rarely tags individual songs, so the artist's tags
+  are often used instead; `tags_source` says which.
+
+Each source can fail on its own (ReccoBeats in particular is flaky). The
+profile still comes back, with a `missing` field saying what's absent and
+why. The LLM interprets the lyrics; the code only gathers facts.
+
+**Lyrics matching**: LRCLIB `/api/get` with artist, title and duration first,
+then `/api/search` limited to recordings within ±2 s with matching names.
+Version suffixes ("- Remastered 2004", "(feat. X)") are stripped before
+lookup. Live and orchestral versions are not, because their lyrics or
+vocals can differ. Lyrics are cached forever; misses are retried after 14
+days.
 
 ### Adding a tool
 
@@ -159,10 +211,11 @@ uv run pytest            # offline: HTTP is mocked with respx + JSON fixtures
 uv run ruff check . && uv run ruff format --check .
 ```
 
-CI runs the same commands and never calls a real API. The fixtures in
-`tests/fixtures/` follow the response shapes in Spotify's documentation.
-Test data must never contain copyrighted lyrics, so lyrics fixtures will be
-invented text.
+CI runs the same commands and never calls a real API. LRCLIB, Last.fm and
+ReccoBeats fixtures in `tests/fixtures/` are recorded responses with images
+and country lists removed. All lyrics in them are replaced with invented
+text, because test data must never contain copyrighted lyrics. The Spotify
+fixtures are hand-built from Spotify's documented response shapes.
 
 ## Spotify API constraints (2026)
 
@@ -184,7 +237,7 @@ behind it, and open questions.
 ## Roadmap
 
 1. ✅ Skeleton, config, SQLite cache, Spotify OAuth, `search_track`
-2. LRCLIB, Last.fm and ReccoBeats clients, `get_track_profile`, `now_playing`
+2. ✅ LRCLIB, Last.fm and ReccoBeats clients, `get_lyrics`, `get_track_profile`, `get_artist_tracks`, `now_playing`
 3. Embeddings (multilingual-e5-small) + LanceDB, `find_similar_by_lyrics`, `analyze_artists`
 4. MCP server exposing all tools
 5. LiteLLM terminal chat, plus `lyricmood watch`, which summarizes each new song as it starts playing

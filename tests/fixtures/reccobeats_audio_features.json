@@ -1,0 +1,36 @@
+{
+ "content": [
+  {
+   "id": "f19473eb-7bb8-465c-b4e9-5d3f57fb48a5",
+   "href": "https://open.spotify.com/track/2DtPEKs3Pj7E06EoWW4vw8",
+   "isrc": "FIP9F0600011",
+   "acousticness": 0.225,
+   "danceability": 0.492,
+   "energy": 0.59,
+   "instrumentalness": 2.79e-05,
+   "key": 5,
+   "liveness": 0.0973,
+   "loudness": -4.593,
+   "mode": 0,
+   "speechiness": 0.0239,
+   "tempo": 91.018,
+   "valence": 0.124
+  },
+  {
+   "id": "56922ecb-849b-4997-978e-d6d9008c6cd0",
+   "href": "https://open.spotify.com/track/1RNwniZkJqdw9LMkkyynjx",
+   "isrc": "DED830471903",
+   "acousticness": 0.000185,
+   "danceability": 0.494,
+   "energy": 0.735,
+   "instrumentalness": 8.38e-05,
+   "key": 0,
+   "liveness": 0.086,
+   "loudness": -6.326,
+   "mode": 0,
+   "speechiness": 0.0348,
+   "tempo": 125.042,
+   "valence": 0.359
+  }
+ ]
+}

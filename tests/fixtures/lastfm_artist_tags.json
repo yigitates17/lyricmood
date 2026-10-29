@@ -1,0 +1,49 @@
+{
+ "toptags": {
+  "tag": [
+   {
+    "count": 100,
+    "name": "alternative rock"
+   },
+   {
+    "count": 89,
+    "name": "rock"
+   },
+   {
+    "count": 39,
+    "name": "finnish"
+   },
+   {
+    "count": 35,
+    "name": "alternative"
+   },
+   {
+    "count": 12,
+    "name": "indie"
+   },
+   {
+    "count": 2,
+    "name": "indie rock"
+   },
+   {
+    "count": 2,
+    "name": "finnish rock"
+   },
+   {
+    "count": 1,
+    "name": "soft rock"
+   },
+   {
+    "count": 1,
+    "name": "Poets of the Fall"
+   },
+   {
+    "count": 1,
+    "name": "male vocalists"
+   }
+  ],
+  "@attr": {
+   "artist": "Poets of the Fall"
+  }
+ }
+}

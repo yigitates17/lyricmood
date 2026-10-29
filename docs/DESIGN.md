@@ -93,13 +93,18 @@ Resolving each one costs a Spotify search.
 - `tracks(spotify_id PK, isrc, data, updated_at)` holds canonical tracks
   with no expiry. Metadata hardly changes.
 - `kv(namespace, key, value, created_at, expires_at)` holds raw API results.
-  Namespaces so far: `spotify:search` (7-day TTL, stores track IDs that point
-  into `tracks`).
+  Namespaces and TTLs:
+  - `spotify:search`: 7 days. Stores track IDs that point into `tracks`.
+  - `lrclib`: keyed by Spotify ID. Hits never expire; misses expire after
+    14 days.
+  - `reccobeats:features`: keyed by Spotify ID. Hits never expire; nulls
+    expire after 14 days.
+  - `reccobeats:recs`: 7 days.
+  - `lastfm:<method>`: 30 days. Keyed by normalized artist/title.
 - **Negative caching**: `get()` returns a `MISS` sentinel on a miss, so a
   stored `null` ("ReccoBeats has no features for this track", "no lyrics on
   LRCLIB") counts as a real answer. The upstream isn't asked again until the
-  TTL runs out. Planned TTLs: positive lyrics never expire; negative lyrics
-  and ReccoBeats nulls expire after 14 days; Last.fm tags after 30 days.
+  TTL runs out.
 - **Concurrency**: WAL mode with a 5 s busy timeout. The MCP server and the
   terminal chat can run at the same time on one file. Calls are synchronous
   sqlite3 behind a lock, because local queries take microseconds and
@@ -116,6 +121,9 @@ Resolving each one costs a Spotify search.
   with waits of hours, and a chat turn shouldn't hang on that.
 - A 401 calls the client's `_on_unauthorized` hook once. Spotify uses it to
   force a token refresh.
+- `_check_response` lets a client mark a response as retryable based on its
+  body. Last.fm needs this, because it reports rate limits and temporary
+  failures as JSON error codes (29, 8, 11, 16), sometimes with HTTP 200.
 
 ## 6. Spotify auth
 
@@ -140,27 +148,53 @@ Resolving each one costs a Spotify search.
 | Source | Constraint | Consequence |
 |---|---|---|
 | Spotify (Feb 2026 dev-mode changes, [changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)) | Removed: artist top tracks, batch `/tracks`, `/users/{id}/playlists`, `POST /users/{id}/playlists`, `/playlists/{id}/tracks` (renamed `/items`). Search max 10 per page. `external_ids` restored in March 2026. Playlist `items` only returned for **your own** playlists. Owner needs Premium; 5 users; quota shared across your apps | Top tracks come from Last.fm. Tracks are fetched one by one and cached forever. Playlists are created with `POST /me/playlists`. Other people's Spotify playlists can't be read |
-| LRCLIB | No key. Exact match by artist + title + album + duration; `/api/search` as fallback. Some tracks are flagged `instrumental` | Duration window ±2 s as specified. Instrumental tracks are cached as "no lyrics" |
-| ReccoBeats | No key, unreliable, sparse coverage | Every response is cached, including nulls. Profiles must work without features |
-| Last.fm | Free key, ~5 req/s guideline | Main source of candidates (similar tracks and artists, tag top tracks). Coverage is thin for niche or non-English music |
+| LRCLIB | No key. `/api/get` matches artist + title + duration (±2 s server-side); `album_name` turned out to be optional. `/api/search` returns at most 20 results. Answers 503 "ServerOverloaded" intermittently, even for songs it has | Album is not sent (Spotify album names like "Once (Remastered)" cause misses). The search fallback filters to ±2 s and fuzzy name matches. 503s are retried |
+| ReccoBeats | No key, unreliable, sparse coverage. `/audio-features?ids=` takes several Spotify IDs; unknown IDs are silently left out, and results come in any order | Batches of 40, matched back by the Spotify URL in `href`. Nulls are cached. Profiles work without features |
+| Last.fm | Free key, ~5 req/s guideline. Errors come as JSON codes. Numbers are sometimes strings. **Track-level tags are rare**: none of 6 sampled songs (English and Finnish) had any | Tags fall back to the artist's (`tags_source: "artist"`). Listener-specific tags ("seen live", "favorites", the artist's own name) and tags below count 5 are dropped |
 | YouTube Data API | 10,000 units/day. `playlistItems.insert` = 50, **`search.list` = 100** | See §8.5. Matching Spotify → YouTube through search is the real bottleneck |
 
-## 8. Upcoming milestones: design notes and open questions
+## 8. Milestone notes and open questions
 
-### 8.1 M2: LRCLIB, Last.fm, ReccoBeats, `get_lyrics`, `get_track_profile`, `get_artist_tracks`
+### 8.1 M2 (done): lyrics, features, tags, artist tracks, now playing
 
-- `get_artist_tracks(artist, limit)`: Spotify's artist top-tracks endpoint is
-  gone. Proposal: get Last.fm `artist.getTopTracks` (listener-based
-  popularity) and resolve each track with a Spotify search, results cached.
-  Fallback: Spotify search `artist:"X"` (relevance order, not popularity).
-- `get_lyrics(track)`: truncate what the LLM sees (proposal: ~2,500
-  characters, cut at stanza boundaries, with a `truncated` flag), but cache
-  the full text. **Decided:** plain lyrics only. LRCLIB's synced
-  (timestamped) lyrics are ignored.
-- "Lyrics-derived summary" in `get_track_profile`: **decided.** The core
-  computes stats (language, line and word counts, repetition ratio,
-  distinctive words), and the profile also includes the truncated lyrics
-  so the LLM does the interpretation.
+- **`get_artist_tracks`**: ranks by Last.fm `artist.getTopTracks`
+  (listeners). It asks for `limit + 10`, because some don't resolve and
+  versions collapse. Each track is resolved with a Spotify search
+  `artist:"X" track:"Y"` (`find_by_name`), which rejects hits whose artist
+  or title fails a fuzzy match (rapidfuzz ratio ≥ 90 after normalization).
+  Duplicates by cleaned title (the original and a remaster) collapse into
+  one. Tracks that can't be found are listed in `not_on_spotify`. Without
+  Last.fm, it falls back to Spotify search `artist:"X"`, filtered to the
+  artist. Cold cost is one Last.fm call plus up to `limit + 10` Spotify
+  searches (~3 s); after that it's served from the cache.
+- **Title cleaning** (`core/text.clean_title`) strips remaster, feat.,
+  radio edit, single/album version and bonus track suffixes. It keeps
+  "Live", "Acoustic" and "Orchestral Version", because those can have
+  different lyrics or none.
+- **`get_lyrics`**: plain lyrics only (decided; synced lyrics are ignored).
+  The text is cut to `LYRICMOOD_LYRICS_MAX_CHARS` (2,500) at a stanza
+  boundary, or a line boundary if the first stanza alone is too long, with
+  `truncated: true`. The full text stays in the cache. `match` says
+  `exact` or `search`.
+- **`get_track_profile`** (decided): computed stats only (lines, stanzas,
+  words, unique-word ratio, the 3 most repeated lines), with the truncated
+  lyrics included so the LLM does the interpretation. **Language detection
+  was dropped**: the LLM reads the lyrics anyway, and a reliable
+  multilingual detector would add a large dependency for nothing. The three
+  sources are fetched in parallel. A `LyricmoodError` from one source turns
+  into an entry in `missing` instead of failing the call, while bugs (other
+  exceptions) still raise.
+- **`now_playing`**: `GET /me/player/currently-playing`. HTTP 204 means
+  `nothing_playing`, and episodes or ads mean `not_a_song`. With
+  `with_profile` (the default) it embeds the full profile, saving the LLM a
+  second call.
+- **ReccoBeats recommendations** and **Last.fm similar tracks, similar
+  artists and tag top tracks** are implemented in the clients but not yet
+  exposed as tools. They feed `find_similar_by_lyrics` in M3.
+- **Possible change (owner to decide)**: the ±2 s rule is strict. When
+  `/api/get` misses and no search result is within ±2 s, the song gets no
+  lyrics, even if a version 3 to 5 s longer exists (common with
+  remasters). A wider fallback marked `match: "approximate"` would fix this.
 
 ### 8.2 M3: embeddings
 

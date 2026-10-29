@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # Spotify's limits are an undisclosed rolling 30s window shared by all of
     # a developer's dev-mode apps, so stay well below anything plausible.
     spotify_rps: float = Field(default=5.0, alias="LYRICMOOD_SPOTIFY_RPS")
+    # Last.fm asks for at most ~5 req/s; LRCLIB and ReccoBeats publish none.
+    lastfm_rps: float = Field(default=4.0, alias="LYRICMOOD_LASTFM_RPS")
+    lrclib_rps: float = Field(default=2.0, alias="LYRICMOOD_LRCLIB_RPS")
+    reccobeats_rps: float = Field(default=2.0, alias="LYRICMOOD_RECCOBEATS_RPS")
+
+    # Lyrics sent to the LLM are cut at a stanza boundary below this length.
+    # The full text stays in the cache.
+    lyrics_max_chars: int = Field(default=2500, alias="LYRICMOOD_LYRICS_MAX_CHARS")
 
     @property
     def resolved_data_dir(self) -> Path:

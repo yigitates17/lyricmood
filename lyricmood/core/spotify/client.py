@@ -9,11 +9,13 @@ import re
 from collections.abc import Awaitable, Callable
 
 import httpx
+from pydantic import BaseModel
 
 from lyricmood.core.cache import DAY, MISS, Cache
 from lyricmood.core.errors import ApiError, NotFound
 from lyricmood.core.http import DEFAULT_RETRY, ApiClient, RateLimiter, RetryPolicy
 from lyricmood.core.models import Track
+from lyricmood.core.text import clean_title, same_name
 
 API_BASE = "https://api.spotify.com/v1"
 SEARCH_PAGE_MAX = 10
@@ -115,3 +117,40 @@ class SpotifyClient(ApiClient):
             return cached
         results = await self.search_tracks(f"isrc:{isrc}", limit=1)
         return results[0] if results else None
+
+    async def find_by_name(self, artist: str, title: str) -> Track | None:
+        """Resolve an artist + title (e.g. from Last.fm) to a Spotify track,
+        rejecting search hits whose artist or title doesn't match."""
+        query = f'artist:"{artist}" track:"{clean_title(title)}"'
+        for track in await self.search_tracks(query, limit=3):
+            if any(same_name(a, artist) for a in track.artists) and same_name(
+                clean_title(track.title), clean_title(title)
+            ):
+                return track
+        return None
+
+    async def currently_playing(self) -> "NowPlaying | None":
+        """What the user is playing now; None when nothing is playing."""
+        response = await self.request("GET", "/me/player/currently-playing")
+        if response.status_code == 204 or not response.content:
+            return None
+        data = response.json()
+        item = data.get("item")
+        track = None
+        if item and data.get("currently_playing_type") == "track":
+            track = Track.from_spotify(item)
+            self.cache.put_tracks([track])
+        return NowPlaying(
+            track=track,
+            is_playing=bool(data.get("is_playing")),
+            progress_ms=data.get("progress_ms"),
+            kind=data.get("currently_playing_type") or "unknown",
+        )
+
+
+class NowPlaying(BaseModel):
+    track: Track | None
+    is_playing: bool
+    progress_ms: int | None = None
+    # "track", "episode", "ad" or "unknown"
+    kind: str

@@ -57,7 +57,9 @@ class RetryPolicy:
 DEFAULT_RETRY = RetryPolicy()
 
 
-class _Retryable(Exception):
+class Retryable(Exception):
+    """Raise from `_check_response` to retry a response that looks successful."""
+
     def __init__(self, response: httpx.Response | None, retry_after: float | None = None):
         self.response = response
         self.retry_after = retry_after
@@ -105,18 +107,22 @@ class ApiClient:
         try:
             response = await self._http.request(method, path, headers=headers, **kwargs)
         except httpx.TransportError as exc:
-            raise _Retryable(None) from exc
+            raise Retryable(None) from exc
         if response.status_code in RETRY_STATUSES:
             retry_after = _retry_after(response)
             if retry_after is not None and retry_after > self.retry.max_retry_after:
                 raise RateLimited(self.name, retry_after)
-            raise _Retryable(response, retry_after)
+            raise Retryable(response, retry_after)
+        self._check_response(response)
         return response
+
+    def _check_response(self, response: httpx.Response) -> None:
+        """Hook for APIs that report transient errors in the response body."""
 
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         retried_auth = False
         while True:
-            response = await self._request_with_retries(method, path, **kwargs)
+            response = await self.request_with_retries(method, path, **kwargs)
             if response.status_code == 401 and not retried_auth and await self._on_unauthorized():
                 retried_auth = True
                 continue
@@ -124,7 +130,8 @@ class ApiClient:
                 raise ApiError(self.name, response.status_code, _error_detail(response))
             return response
 
-    async def _request_with_retries(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def request_with_retries(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Send with retries; non-retryable error responses are returned as-is."""
         exp_wait = wait_exponential_jitter(
             multiplier=self.retry.wait_initial, max=self.retry.wait_max
         )
@@ -138,12 +145,12 @@ class ApiClient:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self.retry.attempts),
                 wait=wait,
-                retry=retry_if_exception_type(_Retryable),
+                retry=retry_if_exception_type(Retryable),
                 reraise=True,
             ):
                 with attempt:
                     return await self._send(method, path, **kwargs)
-        except _Retryable as exc:
+        except Retryable as exc:
             if exc.response is None:
                 raise ApiError(self.name, 0, "network error after retries") from exc.__cause__
             if exc.response.status_code == 429:
