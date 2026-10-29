@@ -451,8 +451,17 @@ Built before M5, because the owner first chose "Claude Code only" (§8.7).
     Hope" landed in the *hope* half on bright, high-energy music despite
     its lyrics, which shows the 50/50 weight. From the owner's library (no
     seeds): 60 candidates, 84 s cold.
-  - The tool only proposes; `create_spotify_playlist` saves. A live
-    write test on the owner's account is pending their permission.
+  - The tool only proposes; `create_spotify_playlist` saves.
+- **Live write test (2026-10-29, with the owner's permission):** on the
+  owner's account, through the real tools:
+  - created a private 3-song playlist;
+  - reordered it (verified by re-reading);
+  - removed one song while re-adding an existing one (skipped as
+    `already_there`);
+  - had an invalid reorder rejected with no change;
+  - removed the playlist with `DELETE /me/library?uris=spotify:playlist:…`
+    (HTTP 200, gone from `/me/playlists`). That works with the scopes
+    already requested, although the docs list `user-library-modify` too.
 
 ### 8.5 M7: `convert_playlist`
 
