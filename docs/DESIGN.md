@@ -276,9 +276,10 @@ on-topic line. So:
   ReccoBeats candidates already carry Spotify IDs and go through
   `get_track`, so every embedded song has a row in the SQLite `tracks`
   table.
-- **`expand_pool=false`:** ranks only songs already in the vector store
-  (earlier searches), with no network beyond the seed. The spec didn't
-  define this; this interpretation is pending the owner's confirmation.
+- **`expand_pool=false`** (decided): ranks only songs already in the vector
+  store (earlier searches), with no network beyond the seed. The spec
+  didn't define `False`; the alternative, a smaller fresh pool, was
+  rejected because it is slow and still needs the network.
 - **Mood blend:** `mood_weight` w gives
   `score = (1-w)·lyrics + w·(1 - dist((valence, energy), seed)/√2)`. When
   either side has no ReccoBeats features, the mood term is skipped rather
