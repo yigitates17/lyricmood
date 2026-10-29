@@ -20,6 +20,9 @@ from tenacity import (
 from lyricmood.core.errors import ApiError, RateLimited
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+IDEMPOTENT_METHODS = {"GET", "HEAD", "PUT", "DELETE"}
+# The request never reached the server, so repeating it is always safe.
+NEVER_SENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
 class RateLimiter:
@@ -104,11 +107,21 @@ class ApiClient:
     async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         await self.limiter.acquire()
         headers = {**kwargs.pop("headers", {}), **await self._auth_headers()}
+        # A POST (create playlist, add songs) that failed after reaching the
+        # server may have been applied; repeating it could add songs twice.
+        # Such requests are retried only when they certainly weren't applied.
+        repeatable = method.upper() in IDEMPOTENT_METHODS
         try:
             response = await self._http.request(method, path, headers=headers, **kwargs)
-        except httpx.TransportError as exc:
+        except NEVER_SENT_ERRORS as exc:
             raise Retryable(None) from exc
-        if response.status_code in RETRY_STATUSES:
+        except httpx.TransportError as exc:
+            if repeatable:
+                raise Retryable(None) from exc
+            raise ApiError(
+                self.name, 0, f"network error during {method}; it may or may not have applied"
+            ) from exc
+        if response.status_code in RETRY_STATUSES and (repeatable or response.status_code == 429):
             retry_after = _retry_after(response)
             if retry_after is not None and retry_after > self.retry.max_retry_after:
                 raise RateLimited(self.name, retry_after)

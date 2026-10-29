@@ -30,3 +30,8 @@ class ApiError(LyricmoodError):
 
 class NotFound(LyricmoodError):
     pass
+
+
+class InvalidInput(LyricmoodError):
+    """Arguments that are well-formed but can't be used (e.g. a track name
+    where a Spotify ID is required)."""

@@ -115,7 +115,7 @@ class FakeEmbedder:
     model_id = "fake-bow"
     dim = 64
 
-    def embed(self, texts):
+    def embed(self, texts, kind="passage"):
         import zlib
 
         import numpy as np

@@ -58,13 +58,17 @@ def test_rank_by_lyrics_then_mood_blend():
     assert blended["spotify_id"].to_list()[0] == "far"
 
 
-def test_rank_skips_mood_term_when_features_missing():
+def test_rank_counts_missing_features_as_typical():
     seed = stored([1, 0])
-    pool = {"a": stored([1, 0.1]), "b": stored([0.1, 1])}
-    out = rank(seed, pool, (0.5, 0.5), {"b": (0.5, 0.5)}, 0.5)
+    pool = {"a": stored([1, 0.1]), "b": stored([0.1, 1]), "c": stored([0.7, 0.7])}
+    moods = {"b": (0.5, 0.5), "c": (0.0, 0.0)}  # "a" has no features
+    out = rank(seed, pool, (0.5, 0.5), moods, 0.5)
     rows = {r["spotify_id"]: r for r in out.iter_rows(named=True)}
     assert rows["a"]["mood"] is None
-    assert rows["a"]["score"] == rows["a"]["lyrics"]
+    median_mood = (rows["b"]["mood"] + rows["c"]["mood"]) / 2
+    assert rows["a"]["score"] == pytest.approx(0.5 * rows["a"]["lyrics"] + 0.5 * median_mood)
+    # Not scored on lyrics alone, which would have given it a perfect 1.0.
+    assert rows["a"]["score"] < 1.0
 
 
 def test_rank_empty_pool():

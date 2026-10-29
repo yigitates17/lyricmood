@@ -93,7 +93,7 @@ def rank(
     with closeness in (valence, energy).
 
     Columns: spotify_id, lyrics (0-1, relative to this pool),
-    mood (0-1 or null), score.
+    mood (0-1, or null when the candidate has no features), score.
     """
     ids = list(candidates)
     if not ids:
@@ -124,10 +124,13 @@ def rank(
     return (
         df.with_columns(lyrics=(pl.col("cosine") - low) / spread)
         .with_columns(
-            # Without features for either side, the mood term is skipped
-            # rather than counted as zero.
-            score=pl.when(pl.col("mood").is_not_null())
-            .then((1 - mood_weight) * pl.col("lyrics") + mood_weight * pl.col("mood"))
+            # A candidate without features counts as typical (the pool's
+            # median mood), so missing data neither helps nor hurts it.
+            score=pl.when(pl.col("mood").is_not_null().any())
+            .then(
+                (1 - mood_weight) * pl.col("lyrics")
+                + mood_weight * pl.col("mood").fill_null(pl.col("mood").median())
+            )
             .otherwise(pl.col("lyrics"))
         )
         .sort("score", descending=True)

@@ -10,15 +10,18 @@ LLM client:
 
 - **MCP server**: use Claude Code, Codex, Gemini CLI or Claude Desktop as
   the chat interface. See [Use it from an MCP client](#use-it-from-an-mcp-client).
-- **Terminal chat**: a small agent loop over LiteLLM, so any model from
-  OpenRouter, Gemini, OpenAI or Anthropic works. *(milestone 5)*
+- **Terminal chat** (`lyricmood chat`, coming in milestone 5): a chat in
+  your terminal with a swappable LLM backend. The first backend is your own
+  Claude Code (no API key). An API backend (LiteLLM: OpenRouter, Gemini,
+  OpenAI, Anthropic) can be added later.
 
 Both read the same tool registry, so every tool is defined once.
 
-> **Status: milestone 4 of 7.** Spotify search, lyrics (LRCLIB), audio
+> **Status: milestones 1–4 and 6 of 7 done; 5 (terminal chat) is next.** Spotify search, lyrics (LRCLIB), audio
 > features (ReccoBeats), Last.fm tags, artist top tracks, the song you're
-> playing now, lyrics-based similar songs and artist comparisons, all
-> available to MCP clients. See [Roadmap](#roadmap).
+> playing now, lyrics-based similar songs, artist comparisons, your top and
+> liked songs, mood playlists and playlist editing, all available to MCP
+> clients. See [Roadmap](#roadmap).
 
 ## Why this exists
 
@@ -122,9 +125,9 @@ songs. Without a key, `get_track_profile` leaves out tags and
 Neither needs a key. lyricmood sends a User-Agent that identifies it, as
 LRCLIB asks.
 
-### YouTube, LLM keys
+### YouTube
 
-These come with milestones 7 and 5.
+This comes with milestone 7.
 
 ## Usage
 
@@ -144,6 +147,10 @@ uv run lyricmood call find_similar_by_lyrics track=2DtPEKs3Pj7E06EoWW4vw8 k=8
 uv run lyricmood call find_similar_by_lyrics track=2DtPEKs3Pj7E06EoWW4vw8 mood_weight=0.4
 uv run lyricmood call find_similar_by_lyrics track="Nemo Nightwish" expand_pool=false
 uv run lyricmood call analyze_artists --json '{"artists": ["Poets of the Fall", "Nightwish"]}'
+uv run lyricmood call get_my_top_tracks time_range=short_term limit=10
+uv run lyricmood call get_my_playlists
+uv run lyricmood call build_mood_playlist --json '{"mood_text": "heartbreak, lonely nights", "valence": 0.2, "energy": 0.35, "seed_artists": ["Nightwish"], "size": 10}'
+uv run lyricmood call build_mood_playlist --json '{"mood_text": "-", "size": 10, "arc": [{"mood_text": "despair, loss", "valence": 0.15}, {"mood_text": "hope, light after the storm", "valence": 0.75}]}'
 ```
 
 `call` runs any tool directly and prints exactly the JSON an LLM would get.
@@ -245,8 +252,13 @@ means `now_playing`; and mention missing data instead of guessing.
 | `now_playing(with_profile)` | 2 | ✅ |
 | `find_similar_by_lyrics(track, k, expand_pool, mood_weight)` | 3 | ✅ |
 | `analyze_artists(artists, tracks_per_artist)` | 3 | ✅ |
-| `get_my_top_tracks`, `get_saved_tracks` | 4–6 | planned |
-| `create_spotify_playlist`, `update_spotify_playlist`, `build_mood_playlist` | 6 | planned |
+| `get_my_top_tracks(time_range, limit)` | 6 | ✅ |
+| `get_saved_tracks(limit, offset)` | 6 | ✅ |
+| `get_my_playlists(limit, offset)` | 6 | ✅ (added: needed to find playlist IDs) |
+| `get_playlist_tracks(playlist, limit)` | 6 | ✅ (added: needed before reordering) |
+| `build_mood_playlist(mood_text, valence, energy, seed_artists, size, arc, …)` | 6 | ✅ |
+| `create_spotify_playlist(name, tracks, description, public)` | 6 | ✅ |
+| `update_spotify_playlist(playlist_id, add, remove, reorder)` | 6 | ✅ |
 | `convert_playlist` | 7 | planned |
 
 Every `track` argument takes a Spotify ID, URL or URI, or free text, which
@@ -303,6 +315,36 @@ song about loss can score close to an English party song. In a mixed
 English/Finnish test, the nearest neighbour was always the right topic,
 but scores aren't comparable across languages. See
 [DESIGN §8.2](docs/DESIGN.md).
+
+**`build_mood_playlist`** proposes an ordered list. It doesn't save
+anything.
+
+- **Where songs come from:** the seed artists' top songs plus three similar
+  artists each, or your own top and liked songs when no artists are given.
+  The pool is about 60 songs (`LYRICMOOD_MOOD_POOL_SIZE`).
+- **How each song is scored:** half on lyrics, comparing `mood_text`
+  against each song's stanzas, and half on music, how close its valence
+  and energy are to the targets. `feature_weight` changes that split.
+  Claude chooses the targets from your words, for example "sad" ≈ valence
+  0.2. A song missing lyrics or features counts as typical on that side,
+  so missing data neither helps nor hurts it.
+- **`arc`** gives 2–5 stages, for example heartbroken → hopeful. Songs
+  move through them gradually, with targets blended position by position.
+- **`max_per_artist`** keeps variety (default 3).
+- **Mixed languages:** give the mood in each language on separate lines,
+  because the model favours lyrics in the query's language.
+
+**Playlist writes** (`create_spotify_playlist`, `update_spotify_playlist`)
+change your Spotify account. New playlists are private by default, and
+their docstrings tell the LLM to confirm with you first. Your MCP client
+also asks before running a tool unless you've allowed it.
+- `update_spotify_playlist` works out the end state and checks it before
+  writing anything, so a bad `reorder` changes nothing.
+- It refuses to reorder playlists that contain podcast episodes or local
+  files, which a rewrite would drop.
+- It skips songs that are already in the playlist.
+- Spotify only lets apps read and edit your own (or collaborative)
+  playlists.
 
 **`analyze_artists`** samples each artist's top songs and returns:
 
@@ -383,8 +425,8 @@ behind it, and open questions.
 2. ✅ LRCLIB, Last.fm and ReccoBeats clients, `get_lyrics`, `get_track_profile`, `get_artist_tracks`, `now_playing`
 3. ✅ Embeddings (multilingual-e5-small via ONNX) + LanceDB, `find_similar_by_lyrics`, `analyze_artists`
 4. ✅ MCP server exposing all tools (`lyricmood-mcp`)
-5. LiteLLM terminal chat, plus `lyricmood watch`, which summarizes each new song as it starts playing
-6. Playlist create/update, `build_mood_playlist`
+5. Terminal chat (`lyricmood chat`) with a swappable backend, starting with Claude Code, plus `lyricmood watch`, which summarizes each new song as it starts playing
+6. ✅ Top/liked songs, playlist create/update/read, `build_mood_playlist` (done before 5)
 7. YouTube client, `convert_playlist`
 
 ## License

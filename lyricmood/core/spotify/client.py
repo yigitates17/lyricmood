@@ -20,11 +20,22 @@ from lyricmood.core.text import clean_title, same_name
 API_BASE = "https://api.spotify.com/v1"
 SEARCH_PAGE_MAX = 10
 SEARCH_TTL = 7 * DAY
+PLAYLIST_FIELDS = "id,name,owner(id),public,collaborative,snapshot_id,items(total),tracks(total)"
+NOT_YOURS = (
+    "Spotify only shows the songs of playlists you own or collaborate on "
+    "(a 2026 API restriction), so this playlist's contents can't be read."
+)
 
 _ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
 _TRACK_REF_RE = re.compile(
     r"(?:open\.spotify\.com/(?:intl-[a-z-]+/)?track/|spotify:track:)([A-Za-z0-9]{22})"
 )
+_PLAYLIST_REF_RE = re.compile(
+    r"(?:open\.spotify\.com/(?:intl-[a-z-]+/)?playlist/|spotify:playlist:)([A-Za-z0-9]{22})"
+)
+# Spotify's per-request caps for playlist writes and item pages.
+WRITE_BATCH = 100
+ITEMS_PAGE = 50
 
 
 def parse_track_id(ref: str) -> str | None:
@@ -33,6 +44,42 @@ def parse_track_id(ref: str) -> str | None:
     if match := _TRACK_REF_RE.search(ref):
         return match.group(1)
     return ref if _ID_RE.match(ref) else None
+
+
+def parse_playlist_id(ref: str) -> str | None:
+    """Extract a playlist ID from a Spotify URL, URI, or bare ID; else None."""
+    ref = ref.strip()
+    if match := _PLAYLIST_REF_RE.search(ref):
+        return match.group(1)
+    return ref if _ID_RE.match(ref) else None
+
+
+class Playlist(BaseModel):
+    id: str
+    name: str
+    owner_id: str | None = None
+    public: bool | None = None
+    collaborative: bool = False
+    total: int | None = None
+    snapshot_id: str | None = None
+
+    @property
+    def url(self) -> str:
+        return f"https://open.spotify.com/playlist/{self.id}"
+
+    @classmethod
+    def from_spotify(cls, data: dict) -> "Playlist":
+        # Feb 2026: the song count moved from `tracks.total` to `items.total`.
+        counts = data.get("items") if isinstance(data.get("items"), dict) else data.get("tracks")
+        return cls(
+            id=data["id"],
+            name=data.get("name") or "",
+            owner_id=(data.get("owner") or {}).get("id"),
+            public=data.get("public"),
+            collaborative=bool(data.get("collaborative")),
+            total=(counts or {}).get("total"),
+            snapshot_id=data.get("snapshot_id"),
+        )
 
 
 class SpotifyClient(ApiClient):
@@ -52,6 +99,7 @@ class SpotifyClient(ApiClient):
         )
         self._token = token_provider
         self.cache = cache
+        self._user_id: str | None = None
 
     async def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {await self._token(False)}"}
@@ -146,6 +194,120 @@ class SpotifyClient(ApiClient):
             progress_ms=data.get("progress_ms"),
             kind=data.get("currently_playing_type") or "unknown",
         )
+
+    # -- library ---------------------------------------------------------------
+
+    async def user_id(self) -> str:
+        if self._user_id is None:
+            self._user_id = (await self.get_json("/me"))["id"]
+        return self._user_id
+
+    async def top_tracks(self, time_range: str = "medium_term", limit: int = 20) -> list[Track]:
+        data = await self.get_json(
+            "/me/top/tracks", {"time_range": time_range, "limit": min(limit, 50)}
+        )
+        tracks = [Track.from_spotify(t) for t in data.get("items") or [] if t]
+        self.cache.put_tracks(tracks)
+        return tracks
+
+    async def saved_tracks(self, limit: int = 20, offset: int = 0) -> tuple[list[Track], int]:
+        """Liked songs, newest first, and the total count."""
+        data = await self.get_json("/me/tracks", {"limit": min(limit, 50), "offset": offset})
+        # /me/tracks kept the old `track` key in the Feb 2026 renames.
+        tracks = [Track.from_spotify(e["track"]) for e in data.get("items") or [] if e.get("track")]
+        self.cache.put_tracks(tracks)
+        return tracks, data.get("total") or 0
+
+    # -- playlists -------------------------------------------------------------
+
+    async def my_playlists(self, limit: int = 20, offset: int = 0) -> tuple[list[Playlist], int]:
+        data = await self.get_json("/me/playlists", {"limit": min(limit, 50), "offset": offset})
+        playlists = [Playlist.from_spotify(p) for p in data.get("items") or [] if p]
+        return playlists, data.get("total") or 0
+
+    async def playlist(self, playlist_id: str) -> Playlist:
+        try:
+            return Playlist.from_spotify(
+                await self.get_json(f"/playlists/{playlist_id}", {"fields": PLAYLIST_FIELDS})
+            )
+        except ApiError as exc:
+            if exc.status in (400, 404):
+                raise NotFound(f"No Spotify playlist with ID {playlist_id}.") from None
+            raise
+
+    async def playlist_tracks(self, playlist_id: str, limit: int = 1000) -> list[Track]:
+        """Songs in a playlist, in order. Episodes and local files are skipped.
+
+        Spotify only returns items for playlists the user owns or
+        collaborates on (Feb 2026)."""
+        tracks: list[Track] = []
+        offset = 0
+        while len(tracks) < limit:
+            try:
+                data = await self.get_json(
+                    f"/playlists/{playlist_id}/items", {"limit": ITEMS_PAGE, "offset": offset}
+                )
+            except ApiError as exc:
+                if exc.status == 403:
+                    raise NotFound(NOT_YOURS) from None
+                if exc.status in (400, 404):
+                    raise NotFound(f"No Spotify playlist with ID {playlist_id}.") from None
+                raise
+            entries = data.get("items") or []
+            for entry in entries:
+                item = entry.get("item") or entry.get("track")
+                if (
+                    item
+                    and item.get("type") == "track"
+                    and not entry.get("is_local")
+                    and item.get("id")
+                ):
+                    tracks.append(Track.from_spotify(item))
+            if len(entries) < ITEMS_PAGE or not data.get("next"):
+                break
+            offset += ITEMS_PAGE
+        self.cache.put_tracks(tracks)
+        return tracks[:limit]
+
+    async def create_playlist(self, name: str, description: str, public: bool) -> Playlist:
+        response = await self.request(
+            "POST",
+            "/me/playlists",
+            json={"name": name, "description": description, "public": public},
+        )
+        return Playlist.from_spotify(response.json())
+
+    async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> str | None:
+        snapshot = None
+        for start in range(0, len(track_ids), WRITE_BATCH):
+            uris = [f"spotify:track:{i}" for i in track_ids[start : start + WRITE_BATCH]]
+            response = await self.request(
+                "POST", f"/playlists/{playlist_id}/items", json={"uris": uris}
+            )
+            snapshot = response.json().get("snapshot_id")
+        return snapshot
+
+    async def remove_from_playlist(self, playlist_id: str, track_ids: list[str]) -> str | None:
+        """Removes every occurrence of each track."""
+        snapshot = None
+        for start in range(0, len(track_ids), WRITE_BATCH):
+            items = [{"uri": f"spotify:track:{i}"} for i in track_ids[start : start + WRITE_BATCH]]
+            response = await self.request(
+                "DELETE", f"/playlists/{playlist_id}/items", json={"items": items}
+            )
+            snapshot = response.json().get("snapshot_id")
+        return snapshot
+
+    async def replace_playlist(self, playlist_id: str, track_ids: list[str]) -> str | None:
+        """Set the playlist to exactly these tracks, in this order."""
+        first, rest = track_ids[:WRITE_BATCH], track_ids[WRITE_BATCH:]
+        response = await self.request(
+            "PUT",
+            f"/playlists/{playlist_id}/items",
+            json={"uris": [f"spotify:track:{i}" for i in first]},
+        )
+        snapshot = response.json().get("snapshot_id")
+        return await self.add_to_playlist(playlist_id, rest) if rest else snapshot
 
 
 class NowPlaying(BaseModel):

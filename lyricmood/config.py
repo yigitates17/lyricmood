@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # Each new candidate costs ~1 Spotify search and 1-2 LRCLIB calls once;
     # everything is cached afterwards.
     similar_pool_size: int = Field(default=40, alias="LYRICMOOD_SIMILAR_POOL_SIZE")
+    # Candidate songs build_mood_playlist considers (seed artists + similar
+    # artists, or your top + saved tracks when no artists are given).
+    mood_pool_size: int = Field(default=60, alias="LYRICMOOD_MOOD_POOL_SIZE")
 
     @property
     def resolved_data_dir(self) -> Path:

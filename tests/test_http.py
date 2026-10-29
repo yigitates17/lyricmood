@@ -92,3 +92,32 @@ async def test_401_refreshes_credentials_once(respx_mock, client):
         await client.get_json("/x")
     assert client.refreshed == 1
     assert route.call_count == 2
+
+
+@respx.mock(base_url=BASE)
+async def test_post_is_not_retried_after_server_error(respx_mock, client):
+    route = respx_mock.post("/x").mock(return_value=httpx.Response(503))
+    with pytest.raises(ApiError, match="503"):
+        await client.request("POST", "/x", json={})
+    assert route.call_count == 1
+
+
+@respx.mock(base_url=BASE)
+async def test_post_is_retried_after_rate_limit_or_connect_error(respx_mock, client):
+    route = respx_mock.post("/x").mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.ConnectError("refused"),
+            httpx.Response(201, json={"ok": True}),
+        ]
+    )
+    assert (await client.request("POST", "/x", json={})).status_code == 201
+    assert route.call_count == 3
+
+
+@respx.mock(base_url=BASE)
+async def test_post_read_timeout_is_not_retried(respx_mock, client):
+    route = respx_mock.post("/x").mock(side_effect=httpx.ReadTimeout("slow"))
+    with pytest.raises(ApiError, match="may or may not have applied"):
+        await client.request("POST", "/x", json={})
+    assert route.call_count == 1

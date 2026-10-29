@@ -31,14 +31,16 @@ class Embedder(Protocol):
     model_id: str
     dim: int
 
-    def embed(self, texts: list[str]) -> np.ndarray:
-        """L2-normalized float32 vectors, one row per text."""
+    def embed(self, texts: list[str], kind: str = "passage") -> np.ndarray:
+        """L2-normalized float32 vectors, one row per text. `kind` is
+        "passage" for lyrics (what gets stored) or "query" for short
+        free-text descriptions searched against lyrics (moods)."""
         ...
 
 
 class E5Embedder:
-    """e5 expects a prefix: "passage: " for lyrics. Lyrics are compared with
-    lyrics, so every stored vector uses the same prefix."""
+    """e5 expects a prefix: "passage: " for lyrics (every stored vector) and
+    "query: " for short texts searched against them, like a mood."""
 
     model_id = f"multilingual-e5-small@{MODEL_REVISION[:7]}:passage"
     dim = 384
@@ -77,13 +79,15 @@ class E5Embedder:
                 fetch("model.onnx"), providers=["CPUExecutionProvider"]
             )
 
-    def embed(self, texts: list[str]) -> np.ndarray:
+    def embed(self, texts: list[str], kind: str = "passage") -> np.ndarray:
+        if kind not in ("passage", "query"):
+            raise ValueError(f"unknown embedding kind {kind!r}")
         if not texts:
             return np.zeros((0, self.dim), dtype=np.float32)
         self._load()
         out = []
         for start in range(0, len(texts), self._batch_size):
-            batch = [f"passage: {t}" for t in texts[start : start + self._batch_size]]
+            batch = [f"{kind}: {t}" for t in texts[start : start + self._batch_size]]
             enc = self._tokenizer.encode_batch(batch)
             ids = np.array([e.ids for e in enc], dtype=np.int64)
             mask = np.array([e.attention_mask for e in enc], dtype=np.int64)

@@ -11,7 +11,8 @@ the owner's input before the milestone that depends on them.
 - Answer "why do I like these?" across tracks or artists.
 - Discover songs by *lyrical* similarity, not only by sound or genre.
 - Build and edit playlists, including mood arcs (e.g. sad → hopeful).
-- Work with any LLM: MCP clients, or any model through LiteLLM.
+- Work with any LLM client: MCP clients, and a terminal chat whose backend
+  can be swapped (Claude Code first; an API backend later).
 
 **Non-goals:** a web frontend, multiple users, pre-embedding a catalog,
 audio analysis.
@@ -41,7 +42,7 @@ scores are skewed by language.
 ```
  Claude Code / Codex / Gemini CLI / Claude Desktop      terminal (typer + rich)
                  │  MCP (stdio)                                 │
-        lyricmood/mcp_server.py (M4)             lyricmood/chat.py (M5, LiteLLM loop)
+        lyricmood/mcp_server.py (M4)             lyricmood/chat.py (M5, backend: Claude Code)
                  └───────────────┬──────────────────────────────┘
                      lyricmood/registry.py   ← one ToolSpec per tool
                      lyricmood/tools/*.py    ← tool functions (auto-discovered)
@@ -384,13 +385,74 @@ owner chose (a). The other argument for (a), more reliable lyrics matching
 through Spotify's exact length, mostly went away once lyrics started
 matching on names (§8.1).
 
-### 8.4 M6: `build_mood_playlist` and arcs
+### 8.4 M6 (done): library, playlists, `build_mood_playlist`
 
-- Mood targets: map `mood_text` to (valence, energy) plus a text embedding
-  of the mood, and score `w1·cosine(lyrics, mood) + w2·feature distance`.
-  ReccoBeats nulls fall back to lyrics only.
-- Arc ordering: split the arc into N segments, give each its target point,
-  and assign tracks greedily without reuse.
+Built before M5, because the owner first chose "Claude Code only" (§8.7).
+
+- **Library tools:** `get_my_top_tracks` (`/me/top/tracks`, 4 weeks / 6
+  months / 1 year), `get_saved_tracks` (`/me/tracks`, which kept the old
+  `track` key), `get_my_playlists`, and `get_playlist_tracks`. The last two
+  weren't in the spec, but the LLM needs playlist IDs and current contents
+  to edit anything. Playlists are marked `editable` (owner or
+  collaborative), because Spotify returns items only for those (403
+  otherwise, with an explanatory error). Item pages are 50 long and
+  followed to the end.
+- **Writes:**
+  - `POST /me/playlists` (private by default), `POST/DELETE/PUT
+    /playlists/{id}/items` in batches of 100. Removal bodies use `items`
+    (renamed from `tracks`).
+  - The HTTP layer no longer retries a POST after a 5xx or a read timeout:
+    the request may have been applied, and repeating "add songs" would
+    duplicate them. It still retries on 429 and connect errors.
+  - Write tools take only Spotify IDs, URLs or URIs. Free-text names are
+    rejected with "use search_track first", so a fuzzy search never puts a
+    wrong song into a real playlist.
+- **`update_spotify_playlist`:**
+  - Order of operations: remove (every occurrence), then add (skipping
+    songs already present), then reorder.
+  - `reorder` is the complete new order, simpler for an LLM than Spotify's
+    range moves, and is applied with `PUT .../items`.
+  - The end state is computed and validated before the first write.
+  - Reordering is refused for playlists containing episodes or local
+    files, since the rewrite would drop them.
+  - Only own and collaborative playlists can be changed.
+- **`build_mood_playlist`:**
+  - **Interpretation:** the core has no LLM, so the calling LLM turns the
+    request into `mood_text` (matched against lyrics) and optional
+    `valence`/`energy` targets. The docstrings give anchor values (sad
+    ≈ 0.15, happy ≈ 0.85).
+  - **Pool:** seed artists' top 10, plus 3 similar artists × 5, or the
+    user's top 50 and liked 50 when there are no seeds. Interleaved and
+    capped at `LYRICMOOD_MOOD_POOL_SIZE` (60).
+  - **Lyrics score:** `query:`-prefixed mood text against stored
+    `passage:` vectors, raw cosine min-max scaled per target. Centering
+    was tried and dropped for queries: on the 78 songs embedded so far, it
+    made "partying and dancing all night" rank a sad ballad first, while
+    raw cosine put Sabaton's "Panzerkampf" first for "war, battle and
+    soldiers".
+  - **Multiple mood lines are averaged**, so the LLM can phrase the mood
+    in each language of the music (the language bias of §8.2).
+  - **Feature score:** `1 - distance / sqrt(dims)` over the dimensions the
+    target sets. Combined as `(1-w)·lyrics + w·features`, w =
+    `feature_weight` (0.5).
+  - **Missing data counts as typical:** a song without lyrics or features
+    gets the median of the songs that have them on that side. Scoring it
+    on one side alone made songs with less information win: in a live run
+    from the owner's library, 4 of the top 6 picks had no features. The
+    same fix went into `find_similar_by_lyrics`'s mood blend.
+  - **Arc:** 2–5 stages. Each playlist position gets an interpolated
+    target (normalized lerp of query vectors, linear lerp of
+    valence/energy where both stages define them; on a stage, its own
+    value). Assignment is greedy, position by position, best unused song,
+    `max_per_artist` (3).
+  - **Measured:** "heartbreak" with Poets of the Fall + Nightwish: 50
+    candidates, 57 s cold, valence of picks 0.07–0.37. A despair → hope arc
+    of 8 songs went from valence 0.23 to 0.78. One weak pick: "End Of All
+    Hope" landed in the *hope* half on bright, high-energy music despite
+    its lyrics, which shows the 50/50 weight. From the owner's library (no
+    seeds): 60 candidates, 84 s cold.
+  - The tool only proposes; `create_spotify_playlist` saves. A live
+    write test on the owner's account is pending their permission.
 
 ### 8.5 M7: `convert_playlist`
 
@@ -426,11 +488,28 @@ matching on names (§8.1).
   track and its profile. Uses `GET /me/player/currently-playing`.
 - Automatic summaries need something that runs on its own, because MCP
   tools only run when the LLM calls them. Plan: a `lyricmood watch` command
-  (M5, since it needs the LiteLLM layer). It polls currently-playing every
-  ~10 s. When the track changes, it fetches lyrics and the profile, asks the
-  configured model for a short summary (themes, notable idioms), and prints
-  it. Every new song costs one LLM call. Summaries are cached per track, so
-  replays are free.
+  (M5), using the same backend as the chat (§8.7). It polls
+  currently-playing every ~10 s. When the track changes, it fetches lyrics
+  and the profile, asks the backend for a short summary (themes, notable
+  idioms), and prints it. Every new song costs one LLM call. Summaries are
+  cached per track, so replays are free.
+
+### 8.7 M5: terminal chat with a swappable backend (next)
+
+- **Owner's constraints:** no local LLMs and no API keys for now; Claude
+  Code is the LLM. The terminal chat stays, but its *backend* is
+  pluggable. (An earlier reading, "drop the terminal chat", was a
+  misunderstanding and was corrected before any change.)
+- **First backend: Claude Code**, through the Claude Agent SDK
+  (`claude-agent-sdk`). It drives the locally installed `claude` CLI with
+  the user's existing login and attaches `lyricmood-mcp` as the tool
+  server, so the chat uses exactly the tools of §3.1.
+- **Later backend: LiteLLM**, an agent loop over `ToolSpec.openai_schema()`
+  calling `registry.call_json` directly, for when an API key is available.
+- **Testing limit:** Claude Code refuses to launch inside another Claude
+  Code session, so the live chat can't be exercised from the development
+  session. It will be unit-tested with a fake backend and tried by the
+  owner in a normal terminal.
 
 ## 9. Testing
 

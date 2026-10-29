@@ -3,7 +3,7 @@
 A tool is an async function `(ctx, args: InputModel) -> OutputModel`
 decorated with `@tool`. Its docstring becomes the description the LLM sees,
 and the pydantic models become the JSON schemas. The MCP server and the
-LiteLLM chat both read this registry, so a tool is defined exactly once.
+terminal chat both read this registry, so a tool is defined exactly once.
 
 Adding a tool: create any module in `lyricmood/tools/` and decorate a function
 with `@tool`. Modules there are discovered automatically.
@@ -36,7 +36,8 @@ class ToolSpec:
         return self.input_model.model_json_schema()
 
     def openai_schema(self) -> dict[str, Any]:
-        """Function-calling schema in the OpenAI format LiteLLM accepts."""
+        """Function-calling schema in the OpenAI format, which LiteLLM and most
+        LLM APIs accept; ready for an API chat backend."""
         return {
             "type": "function",
             "function": {
