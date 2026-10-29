@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets and local data
+.env
+.cache
+*.sqlite3
+*.sqlite3-*
+data/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.DS_Store

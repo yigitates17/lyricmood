@@ -1,0 +1,166 @@
+{
+ "tracks": {
+  "href": "https://api.spotify.com/v1/search?query=nemo&type=track",
+  "items": [
+   {
+    "album": {
+     "album_type": "album",
+     "id": "AAAAAAAAAAAAAAAAAAAAAA",
+     "name": "Once",
+     "release_date": "2004-06-07",
+     "release_date_precision": "day",
+     "images": [],
+     "type": "album",
+     "uri": "spotify:album:AAAAAAAAAAAAAAAAAAAAAA",
+     "artists": [
+      {
+       "id": "2NPduAUeLVsfIauhRwuft1",
+       "name": "Nightwish",
+       "type": "artist",
+       "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1"
+      }
+     ]
+    },
+    "artists": [
+     {
+      "id": "2NPduAUeLVsfIauhRwuft1",
+      "name": "Nightwish",
+      "type": "artist",
+      "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/2NPduAUeLVsfIauhRwuft1"
+      }
+     }
+    ],
+    "disc_number": 1,
+    "duration_ms": 276000,
+    "explicit": false,
+    "external_ids": {
+     "isrc": "FIXTUREISRC01"
+    },
+    "external_urls": {
+     "spotify": "https://open.spotify.com/track/1pVuCVMH2Ex4ab4bNIpw6S"
+    },
+    "href": "https://api.spotify.com/v1/tracks/1pVuCVMH2Ex4ab4bNIpw6S",
+    "id": "1pVuCVMH2Ex4ab4bNIpw6S",
+    "is_local": false,
+    "name": "Nemo",
+    "track_number": 1,
+    "type": "track",
+    "uri": "spotify:track:1pVuCVMH2Ex4ab4bNIpw6S"
+   },
+   {
+    "album": {
+     "album_type": "album",
+     "id": "AAAAAAAAAAAAAAAAAAAAAA",
+     "name": "Once (Remastered)",
+     "release_date": "2005-01-01",
+     "release_date_precision": "day",
+     "images": [],
+     "type": "album",
+     "uri": "spotify:album:AAAAAAAAAAAAAAAAAAAAAA",
+     "artists": [
+      {
+       "id": "2NPduAUeLVsfIauhRwuft1",
+       "name": "Nightwish",
+       "type": "artist",
+       "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1"
+      }
+     ]
+    },
+    "artists": [
+     {
+      "id": "2NPduAUeLVsfIauhRwuft1",
+      "name": "Nightwish",
+      "type": "artist",
+      "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/2NPduAUeLVsfIauhRwuft1"
+      }
+     }
+    ],
+    "disc_number": 1,
+    "duration_ms": 280500,
+    "explicit": false,
+    "external_ids": {},
+    "external_urls": {
+     "spotify": "https://open.spotify.com/track/6NmXV4o6bmp704aPGyTVVG"
+    },
+    "href": "https://api.spotify.com/v1/tracks/6NmXV4o6bmp704aPGyTVVG",
+    "id": "6NmXV4o6bmp704aPGyTVVG",
+    "is_local": false,
+    "name": "Nemo - Orchestral Version",
+    "track_number": 1,
+    "type": "track",
+    "uri": "spotify:track:6NmXV4o6bmp704aPGyTVVG"
+   },
+   {
+    "album": {
+     "album_type": "album",
+     "id": "AAAAAAAAAAAAAAAAAAAAAA",
+     "name": "Once",
+     "release_date": "2004-06-07",
+     "release_date_precision": "day",
+     "images": [],
+     "type": "album",
+     "uri": "spotify:album:AAAAAAAAAAAAAAAAAAAAAA",
+     "artists": [
+      {
+       "id": "2NPduAUeLVsfIauhRwuft1",
+       "name": "Nightwish",
+       "type": "artist",
+       "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1"
+      },
+      {
+       "id": "3kjuyTCjPG1WMFCiyc5IuB",
+       "name": "Example Guest",
+       "type": "artist",
+       "uri": "spotify:artist:3kjuyTCjPG1WMFCiyc5IuB"
+      }
+     ]
+    },
+    "artists": [
+     {
+      "id": "2NPduAUeLVsfIauhRwuft1",
+      "name": "Nightwish",
+      "type": "artist",
+      "uri": "spotify:artist:2NPduAUeLVsfIauhRwuft1",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/2NPduAUeLVsfIauhRwuft1"
+      }
+     },
+     {
+      "id": "3kjuyTCjPG1WMFCiyc5IuB",
+      "name": "Example Guest",
+      "type": "artist",
+      "uri": "spotify:artist:3kjuyTCjPG1WMFCiyc5IuB",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/3kjuyTCjPG1WMFCiyc5IuB"
+      }
+     }
+    ],
+    "disc_number": 1,
+    "duration_ms": 600000,
+    "explicit": false,
+    "external_ids": {
+     "isrc": "FIXTUREISRC02"
+    },
+    "external_urls": {
+     "spotify": "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b"
+    },
+    "href": "https://api.spotify.com/v1/tracks/0VjIjW4GlUZAMYd2vXMi3b",
+    "id": "0VjIjW4GlUZAMYd2vXMi3b",
+    "is_local": false,
+    "name": "Ghost Love Score",
+    "track_number": 1,
+    "type": "track",
+    "uri": "spotify:track:0VjIjW4GlUZAMYd2vXMi3b"
+   }
+  ],
+  "limit": 5,
+  "next": null,
+  "offset": 0,
+  "previous": null,
+  "total": 3
+ }
+}
