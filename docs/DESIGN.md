@@ -311,6 +311,55 @@ on-topic line. So:
   misleading number. `analyze_artists` therefore doesn't need the
   embeddings extra.
 
+### 8.2a M4 (done): MCP server
+
+- **`lyricmood/mcp_server.py`** builds a FastMCP (4.x) server from the
+  registry. Each `ToolSpec` becomes a function whose signature is the input
+  model's fields as keyword parameters (with pydantic constraints and
+  descriptions), so clients see `track`, `k`, `mood_weight` and so on
+  instead of one nested `args` object. Validation happens twice, once by
+  FastMCP from the signature and once by the registry, so a malformed call
+  never reaches a tool.
+- **Results** are `registry.call_json` strings, one compact JSON text
+  block. `output_schema=None` turns off FastMCP's structured copy, which
+  some clients would show alongside the text and so double the tokens.
+- **Errors:** a `LyricmoodError` becomes a FastMCP `ToolError` carrying the
+  same user-facing message ("Run `uv run lyricmood auth spotify`...").
+  Validation errors come back as tool errors too. Other exceptions are
+  bugs and surface as generic failures.
+- **One `AppContext` per server process**, created in the FastMCP lifespan
+  and closed on shutdown, so all tool calls share the HTTP clients, the
+  rate limiters, the SQLite connection and the loaded model.
+- **Server instructions** (sent to the client at initialize) hold the only
+  LLM guidance in the project besides the tool docstrings: the user may
+  not be a native speaker, so explain idioms and translate key lines;
+  "this song" means `now_playing`; warn before slow similarity searches;
+  mention `missing` instead of guessing. This lives in the MCP layer, never
+  in core.
+- **Launch:** the README registers `.venv/bin/lyricmood-mcp` by absolute
+  path rather than `uv run --directory ...`. It needs no flags (Gemini's
+  `mcp add` parses flags after the command), it doesn't depend on the
+  client's working directory, and it starts in ~0.6 s. Everything else
+  (`.env`, the data dir) is found from the package location (§3).
+- **Timeouts:** a song's first `find_similar_by_lyrics` takes ~55 s. Codex
+  defaults to 60 s per tool call (`tool_timeout_sec`), and Claude Desktop
+  has been reported to cancel at ~60 s, so the README raises Codex's limit
+  and offers a CLI warm-up for Desktop. Claude Code's tool timeout is long
+  by default. `lyricmood download-model` exists so the 480 MB model never
+  downloads inside a tool call.
+- **Verification (2026-10-29):**
+  - A FastMCP client spawned the real binary over stdio and called
+    `search_track`, `get_track_profile`, `find_similar_by_lyrics` and
+    `now_playing` against the live APIs; bad arguments came back as tool
+    errors.
+  - `claude mcp list` reported "✓ Connected" for a project-scoped config
+    in a scratch folder.
+  - A headless `claude -p` chat test was not possible from inside another
+    Claude Code session (nested sessions are blocked), so the in-chat test
+    is left to the owner.
+  - Unit tests run the server in-memory with mocked APIs and check that a
+    newly registered tool appears without changes to the server.
+
 ### 8.3 M3: candidate identity (decided: option a)
 
 Every candidate is resolved to a Spotify ID before embedding (one cached

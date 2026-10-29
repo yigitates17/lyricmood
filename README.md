@@ -9,16 +9,16 @@ lyricmood has no chat UI of its own. It's a set of tools you can use from any
 LLM client:
 
 - **MCP server**: use Claude Code, Codex, Gemini CLI or Claude Desktop as
-  the chat interface. *(milestone 4)*
+  the chat interface. See [Use it from an MCP client](#use-it-from-an-mcp-client).
 - **Terminal chat**: a small agent loop over LiteLLM, so any model from
   OpenRouter, Gemini, OpenAI or Anthropic works. *(milestone 5)*
 
 Both read the same tool registry, so every tool is defined once.
 
-> **Status: milestone 3 of 7.** Spotify search, lyrics (LRCLIB), audio
+> **Status: milestone 4 of 7.** Spotify search, lyrics (LRCLIB), audio
 > features (ReccoBeats), Last.fm tags, artist top tracks, the song you're
-> playing now, lyrics-based similar songs, and artist comparisons. See
-> [Roadmap](#roadmap).
+> playing now, lyrics-based similar songs and artist comparisons, all
+> available to MCP clients. See [Roadmap](#roadmap).
 
 ## Why this exists
 
@@ -153,6 +153,86 @@ Your data (SQLite cache, Spotify token, lyrics vectors, the model) lives in
 `~/.lyricmood`. It sits outside the repo on purpose: MCP clients start the
 server from whatever directory they like, and they all need to share one
 cache. Set `LYRICMOOD_DATA_DIR` to move it.
+
+## Use it from an MCP client
+
+The MCP server (`lyricmood-mcp`) exposes every tool over stdio. It finds
+`.env` and `~/.lyricmood` by itself, so clients need no environment
+variables. Before registering it:
+
+```bash
+cd ~/lyricmood
+uv sync --extra embeddings
+uv run lyricmood auth spotify      # the server can't open a login prompt itself
+uv run lyricmood download-model    # so the first similarity search doesn't
+                                   # spend a tool call downloading 480 MB
+```
+
+Every example below points at the server binary inside the project's
+virtualenv. Replace `$HOME/lyricmood` if you cloned somewhere else. A direct
+path works no matter which directory the client starts in, needs no extra
+flags, and starts in about half a second. Re-run `uv sync --extra embeddings`
+after pulling updates.
+
+**Claude Code**
+
+```bash
+claude mcp add -s user lyricmood -- "$HOME/lyricmood/.venv/bin/lyricmood-mcp"
+claude mcp list                    # should show: lyricmood ... ✓ Connected
+```
+
+`-s user` makes it available in every project. Inside Claude Code, `/mcp`
+lists the tools. Try *"What is Carnival of Rust by Poets of the Fall
+about?"* or *"Explain the song I'm playing right now."*
+
+**Codex CLI**
+
+```bash
+codex mcp add lyricmood -- "$HOME/lyricmood/.venv/bin/lyricmood-mcp"
+```
+
+Codex stops tool calls after 60 s by default, and a song's first
+`find_similar_by_lyrics` can take about a minute. Raise the limit in
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.lyricmood]
+command = "/Users/you/lyricmood/.venv/bin/lyricmood-mcp"
+tool_timeout_sec = 180
+```
+
+**Gemini CLI**
+
+```bash
+gemini mcp add -s user lyricmood "$HOME/lyricmood/.venv/bin/lyricmood-mcp"
+```
+
+Use `-s user`. Gemini refuses project-scoped config in folders it doesn't
+trust.
+
+**Claude Desktop**
+
+Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`
+and restart the app:
+
+```json
+{
+  "mcpServers": {
+    "lyricmood": {
+      "command": "/Users/you/lyricmood/.venv/bin/lyricmood-mcp"
+    }
+  }
+}
+```
+
+The desktop app has been reported to cancel tool calls after about 60 s.
+If a first similarity search fails there, run it once from the terminal
+(`uv run lyricmood call find_similar_by_lyrics track=...`) to fill the
+cache, then ask again.
+
+The server also sends the client short instructions: the user may not be a
+native speaker, so explain idioms and translate key lines; "this song"
+means `now_playing`; and mention missing data instead of guessing.
 
 ## Tools
 
@@ -302,7 +382,7 @@ behind it, and open questions.
 1. ✅ Skeleton, config, SQLite cache, Spotify OAuth, `search_track`
 2. ✅ LRCLIB, Last.fm and ReccoBeats clients, `get_lyrics`, `get_track_profile`, `get_artist_tracks`, `now_playing`
 3. ✅ Embeddings (multilingual-e5-small via ONNX) + LanceDB, `find_similar_by_lyrics`, `analyze_artists`
-4. MCP server exposing all tools
+4. ✅ MCP server exposing all tools (`lyricmood-mcp`)
 5. LiteLLM terminal chat, plus `lyricmood watch`, which summarizes each new song as it starts playing
 6. Playlist create/update, `build_mood_playlist`
 7. YouTube client, `convert_playlist`

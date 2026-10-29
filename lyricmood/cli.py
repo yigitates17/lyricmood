@@ -120,5 +120,27 @@ def call(
         _fail(f"invalid arguments for {name}:\n{exc}")
 
 
+@app.command()
+def mcp() -> None:
+    """Run the MCP server over stdio (what MCP clients launch)."""
+    from lyricmood.mcp_server import main as run_server
+
+    run_server()
+
+
+@app.command("download-model")
+def download_model() -> None:
+    """Download the lyrics embedding model (~480 MB, once). Doing this up
+    front keeps the first similarity search from timing out in MCP clients."""
+    from lyricmood.core.embeddings import E5Embedder
+
+    console.print("Downloading intfloat/multilingual-e5-small (ONNX)...")
+    try:
+        E5Embedder(get_settings().models_dir).embed(["warm-up"])
+    except LyricmoodError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Model ready in {get_settings().models_dir}[/green]")
+
+
 def main() -> None:
     app()
