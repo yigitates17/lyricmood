@@ -148,7 +148,7 @@ Resolving each one costs a Spotify search.
 | Source | Constraint | Consequence |
 |---|---|---|
 | Spotify (Feb 2026 dev-mode changes, [changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)) | Removed: artist top tracks, batch `/tracks`, `/users/{id}/playlists`, `POST /users/{id}/playlists`, `/playlists/{id}/tracks` (renamed `/items`). Search max 10 per page. `external_ids` restored in March 2026. Playlist `items` only returned for **your own** playlists. Owner needs Premium; 5 users; quota shared across your apps | Top tracks come from Last.fm. Tracks are fetched one by one and cached forever. Playlists are created with `POST /me/playlists`. Other people's Spotify playlists can't be read |
-| LRCLIB | No key. `/api/get` matches artist + title + duration (±2 s server-side); `album_name` turned out to be optional. `/api/search` returns at most 20 results. Answers 503 "ServerOverloaded" intermittently, even for songs it has | Album is not sent (Spotify album names like "Once (Remastered)" cause misses). The search fallback filters to ±2 s and fuzzy name matches. 503s are retried |
+| LRCLIB | No key. `/api/get` matches artist + title + duration (±2 s server-side); `album_name` turned out to be optional. `/api/search` returns at most 20 results. Answers 503 "ServerOverloaded" intermittently, even for songs it has | Album is not sent (Spotify album names like "Once (Remastered)" cause misses). The search fallback matches on artist + title only; duration just ranks the matches (§8.1). 503s are retried |
 | ReccoBeats | No key, unreliable, sparse coverage. `/audio-features?ids=` takes several Spotify IDs; unknown IDs are silently left out, and results come in any order | Batches of 40, matched back by the Spotify URL in `href`. Nulls are cached. Profiles work without features |
 | Last.fm | Free key, ~5 req/s guideline. Errors come as JSON codes. Numbers are sometimes strings. **Track-level tags are rare**: none of 6 sampled songs (English and Finnish) had any | Tags fall back to the artist's (`tags_source: "artist"`). Listener-specific tags ("seen live", "favorites", the artist's own name) and tags below count 5 are dropped |
 | YouTube Data API | 10,000 units/day. `playlistItems.insert` = 50, **`search.list` = 100** | See §8.5. Matching Spotify → YouTube through search is the real bottleneck |
@@ -191,10 +191,16 @@ Resolving each one costs a Spotify search.
 - **ReccoBeats recommendations** and **Last.fm similar tracks, similar
   artists and tag top tracks** are implemented in the clients but not yet
   exposed as tools. They feed `find_similar_by_lyrics` in M3.
-- **Possible change (owner to decide)**: the ±2 s rule is strict. When
-  `/api/get` misses and no search result is within ±2 s, the song gets no
-  lyrics, even if a version 3 to 5 s longer exists (common with
-  remasters). A wider fallback marked `match: "approximate"` would fix this.
+- **Lyrics match on names, not duration** (decided; replaces the original
+  ±2 s rule). Duration only matters for synced lyrics, whose timestamps
+  must fit the recording, and we use plain lyrics only. Real case: LRCLIB
+  had about 20 "Poets of the Fall – Carnival of Rust" entries between 221 s
+  and 288 s (radio edit, compilations, live sessions). None was within ±2 s
+  of Spotify's 263 s, yet all very likely share the same lyrics. The rule
+  is now: fuzzy artist + title match, entries with lyrics beat
+  instrumental-flagged ones, and the closest duration breaks ties.
+  `/api/get` with duration is still tried first, because it's one precise
+  call.
 
 ### 8.2 M3: embeddings
 
@@ -243,6 +249,15 @@ resolved.
   a Spotify search (`isrc:` doesn't help, since the source has no ISRC).
   Spotify → YouTube: `search.list` at 100 units per track. With inserts at
   50, a 50-track playlist costs about 7,500 of the 10,000 daily units.
+- **Matching rule (proposal; decide at M7)**: names are the main signal,
+  with duration as a sanity check, unlike lyrics. A wrong *recording* is
+  something you hear: YouTube results for "Nightwish Nemo" include the
+  official video with a long intro, live shows, sped-up and nightcore
+  edits, covers and 1-hour loops, all with nearly the same name. Proposal:
+  rank by name similarity, prefer the closest length, and send large
+  mismatches (more than ~15 s) to the "please check" report instead of
+  silently adding them. ytmusicapi's "songs" filter returns the album
+  recordings, with clean artist/title/duration, which avoids most of this.
 - Resumable transfers: keep a `transfers` table (source, target, item index,
   status, matched ID). Each run continues from the first unfinished item.
 - **Decided:** Spotify → YouTube matching searches with

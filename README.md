@@ -169,12 +169,17 @@ Each source can fail on its own (ReccoBeats in particular is flaky). The
 profile still comes back, with a `missing` field saying what's absent and
 why. The LLM interprets the lyrics; the code only gathers facts.
 
-**Lyrics matching**: LRCLIB `/api/get` with artist, title and duration first,
-then `/api/search` limited to recordings within ±2 s with matching names.
-Version suffixes ("- Remastered 2004", "(feat. X)") are stripped before
-lookup. Live and orchestral versions are not, because their lyrics or
-vocals can differ. Lyrics are cached forever; misses are retried after 14
-days.
+**Lyrics matching**: artist + title decide the match; duration only breaks
+ties. lyricmood tries LRCLIB `/api/get` with artist, title and duration
+first. If that misses, it searches and takes the entry whose artist and
+title match (fuzzy), choosing the closest length and preferring entries
+with lyrics over ones flagged instrumental. Length never rejects a match,
+because plain lyrics are the same across remasters, compilations and radio
+edits. Length only matters for synced (timestamped) lyrics, which lyricmood
+doesn't use. Version suffixes ("- Remastered 2004", "(feat. X)") are
+stripped before lookup. "Live" and "Orchestral Version" are kept, because
+their lyrics can differ or be missing. Lyrics are cached forever; misses are
+retried after 14 days.
 
 ### Adding a tool
 

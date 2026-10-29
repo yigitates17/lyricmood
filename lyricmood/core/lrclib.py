@@ -12,7 +12,6 @@ from lyricmood.core.models import Track
 from lyricmood.core.text import clean_title, same_name
 
 API_BASE = "https://lrclib.net/api"
-DURATION_TOLERANCE_S = 2.0
 NOT_FOUND_TTL = 14 * DAY
 
 
@@ -21,7 +20,7 @@ class Lyrics(BaseModel):
     instrumental: bool = False
     lrclib_id: int
     # "exact": /api/get matched artist + title + duration.
-    # "search": picked from /api/search results within the duration tolerance.
+    # "search": artist + title match from /api/search; closest duration wins.
     match: Literal["exact", "search"]
 
 
@@ -85,17 +84,22 @@ class LrclibClient(ApiClient):
         if hit := await self.get(artist, title, duration):
             return _to_lyrics(hit, "exact")
 
+        # Plain lyrics are the same across versions (remasters, compilations,
+        # radio edits), so artist + title decide the match. Duration only
+        # ranks the matches; it never rejects one.
         candidates = [
             r
             for r in await self.search(artist, title)
             if (r.get("plainLyrics") or r.get("instrumental"))
-            and abs((r.get("duration") or 0) - duration) <= DURATION_TOLERANCE_S
             and same_name(r.get("artistName") or "", artist)
             and same_name(clean_title(r.get("trackName") or ""), title)
         ]
+        # Prefer entries with lyrics; an instrumental entry only wins when
+        # it is all LRCLIB has.
+        candidates = [r for r in candidates if r.get("plainLyrics")] or candidates
         if not candidates:
             return None
-        best = min(candidates, key=lambda r: abs(r["duration"] - duration))
+        best = min(candidates, key=lambda r: abs((r.get("duration") or 0) - duration))
         return _to_lyrics(best, "search")
 
 

@@ -44,14 +44,53 @@ async def test_lrclib_exact_match_is_cached(lrclib, router):
     assert route.call_count == 1
 
 
-async def test_lrclib_search_fallback_respects_duration_and_names(lrclib, router):
+async def test_lrclib_search_fallback_matches_names_closest_duration_wins(lrclib, router):
     router.get(f"{LRCLIB}/get").respond(404, json={"code": 404})
     router.get(f"{LRCLIB}/search").respond(json=load_fixture("lrclib_search_carnival.json"))
 
     lyrics = await lrclib.find_lyrics(CARNIVAL)
-    # 259.0 is >2s off; "(Live)" and "Someone Else" don't match names.
+    # "(Live)" and "Someone Else" don't match names; of the two that do,
+    # 262.4s is closer to Spotify's 262.9s than 259s.
     assert lyrics.match == "search"
     assert lyrics.lrclib_id == 101
+
+
+def search_record(id: int, duration: float, *, lyrics: str | None, instrumental=False) -> dict:
+    return {
+        "id": id,
+        "trackName": "Carnival of Rust",
+        "artistName": "Poets of the Fall",
+        "duration": duration,
+        "instrumental": instrumental,
+        "plainLyrics": lyrics,
+    }
+
+
+async def test_lrclib_duration_never_rejects_a_name_match(lrclib, router):
+    router.get(f"{LRCLIB}/get").respond(404)
+    router.get(f"{LRCLIB}/search").respond(json=[search_record(7, 221.0, lyrics="Invented")])
+    assert (await lrclib.find_lyrics(CARNIVAL)).lrclib_id == 7
+
+
+async def test_lrclib_prefers_lyrics_over_closer_instrumental(lrclib, router):
+    router.get(f"{LRCLIB}/get").respond(404)
+    router.get(f"{LRCLIB}/search").respond(
+        json=[
+            search_record(1, 263.0, lyrics=None, instrumental=True),
+            search_record(2, 240.0, lyrics="Invented"),
+        ]
+    )
+    lyrics = await lrclib.find_lyrics(CARNIVAL)
+    assert (lyrics.lrclib_id, lyrics.plain, lyrics.instrumental) == (2, "Invented", False)
+
+
+async def test_lrclib_instrumental_only(lrclib, router):
+    router.get(f"{LRCLIB}/get").respond(404)
+    router.get(f"{LRCLIB}/search").respond(
+        json=[search_record(1, 263.0, lyrics=None, instrumental=True)]
+    )
+    lyrics = await lrclib.find_lyrics(CARNIVAL)
+    assert (lyrics.plain, lyrics.instrumental) == (None, True)
 
 
 async def test_lrclib_miss_is_cached(lrclib, router):
