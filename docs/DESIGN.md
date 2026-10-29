@@ -214,10 +214,10 @@ Resolving each one costs a Spotify search.
   `model` is part of the key, so switching models re-embeds lazily instead of
   mixing vector spaces.
 
-### 8.3 M3: candidate identity (**open**; deferred to M3)
+### 8.3 M3: candidate identity (decided: option a)
 
-For now, follow the original spec: resolve candidates to Spotify ID/ISRC.
-The owner will revisit this when M3 starts.
+Every candidate is resolved to a Spotify ID before embedding (one cached
+search each), so it gets ReccoBeats features for the mood blend.
 
 `find_similar_by_lyrics` expands candidates through Last.fm (similar
 tracks, tag top tracks) and ReccoBeats recommendations. Last.fm gives
@@ -255,9 +255,10 @@ resolved.
   something you hear: YouTube results for "Nightwish Nemo" include the
   official video with a long intro, live shows, sped-up and nightcore
   edits, covers and 1-hour loops, all with nearly the same name. So:
-  rank by name similarity and pick the closest length. **Open:** whether
-  large mismatches (more than ~15 s) should also be listed in the "please
-  check" report. ytmusicapi's "songs" filter returns the album
+  rank by name similarity and pick the closest length. Matches that are
+  more than `LYRICMOOD_PLAYLIST_LENGTH_WARN_S` seconds off (default 15;
+  0 turns it off) are still added, but listed in the "please check" report
+  (decided). This goes in the README with M7. ytmusicapi's "songs" filter returns the album
   recordings, with clean artist/title/duration, which avoids most of this.
 - Resumable transfers: keep a `transfers` table (source, target, item index,
   status, matched ID). Each run continues from the first unfinished item.
