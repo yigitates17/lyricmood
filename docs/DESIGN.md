@@ -32,8 +32,9 @@ behind an LLM-agnostic tool layer. Worth building.
 **Lesson from prior art:** raw lyric-embedding similarity has been reported
 as weak on its own
 ([DZone](https://dzone.com/articles/harmonizing-ai-crafting-personalized-song-suggesti)).
-That's why `find_similar_by_lyrics` blends in mood features and why §8.3
-proposes chunked embeddings.
+That's why `find_similar_by_lyrics` can blend in mood features and embeds
+lyrics per stanza (§8.2). Our own check confirmed a related weakness: raw
+scores are skewed by language.
 
 ## 3. Architecture
 
@@ -85,8 +86,8 @@ can be matched later. Every tool that takes a track accepts one string
 `track` and resolves it with `SpotifyClient.resolve`: a URL, URI or ID is
 fetched directly, and free text resolves to the top search hit.
 
-**Open (M3):** see §8.3. Candidates from Last.fm don't have Spotify IDs.
-Resolving each one costs a Spotify search.
+Candidates from Last.fm, which have no Spotify IDs, are resolved to a
+Spotify track before embedding (§8.3).
 
 ## 4. Caching (SQLite, `~/.lyricmood/cache.sqlite3`)
 
@@ -202,17 +203,112 @@ Resolving each one costs a Spotify search.
   `/api/get` with duration is still tried first, because it's one precise
   call.
 
-### 8.2 M3: embeddings
+### 8.2 M3 (done): embeddings, `find_similar_by_lyrics`, `analyze_artists`
 
-- Model: `intfloat/multilingual-e5-small` on CPU. Inputs need the
-  `"passage: "` prefix for lyrics and `"query: "` for free-text mood
-  queries. Max 512 tokens.
-- **Proposal:** chunk lyrics by stanza, embed each chunk, and store the mean
-  (plus the chunks, for "which part is similar"). Truncating to the first
-  512 tokens would mostly embed verse 1.
-- LanceDB table `lyrics_vectors(spotify_id, isrc, model, chunk_ix, vector)`.
-  `model` is part of the key, so switching models re-embeds lazily instead of
-  mixing vector spaces.
+**Runtime (decided: ONNX, no PyTorch).** sentence-transformers would pull in
+PyTorch: 568 MB installed on macOS, and the default Linux wheel bundles
+CUDA (~2 GB). The model's official repo ships an ONNX export
+(`onnx/model.onnx`, the same weights), so lyricmood runs it with
+`onnxruntime` + `tokenizers` and does e5's mean pooling and L2
+normalization itself (`core/embeddings.py`). The revision is pinned
+(`614241f`) so a model update can't silently change stored vectors. The
+smaller exports in the repo were not used: `model_O4` is a GPU fp16
+optimization, and `qint8_avx512_vnni` targets Intel CPUs.
+
+**Optional extra (decided).** `onnxruntime`, `tokenizers`,
+`huggingface-hub` and `lancedb` live in the `embeddings` extra. Measured:
+the base install is ~215 MB and the extra adds ~385 MB; the model download
+is 480 MB. numpy and Polars are base dependencies, because the ranking
+code and future mood playlists use them. Without the extra,
+`find_similar_by_lyrics` raises a `ConfigError` with the install command.
+
+**Prefix.** Every stored lyrics vector uses `"passage: "`. Lyrics are only
+compared with lyrics, so the prefix just has to be consistent. Free-text
+mood queries (M6) should use `"query: "` against these passages, which is
+e5's asymmetric setup. The model ID stored with each vector includes the
+prefix and revision.
+
+**Chunking.** Lyrics are split into stanzas. Repeated stanzas (the chorus)
+are kept once, so a 4× chorus doesn't dominate. Stanzas under 60
+characters merge into the next, and at most 16 chunks are kept. The song
+vector is the normalized mean of its chunk vectors. Chunks are stored too,
+so `matching_lines` can show the most alike stanza pair. A single
+512-token window would mostly embed verse 1.
+
+**Storage.** LanceDB at `~/.lyricmood/vectors`, two tables: `lyrics` (key
+`model:spotify_id`, isrc, vector) and `lyrics_chunks`. Upserts go through
+`merge_insert`. Nothing is pre-embedded; only candidates are.
+
+**Measured behaviour (2026-10-29).** Twelve invented lines: 3 topics (loss,
+party, rebellion) × 2 languages (English, Finnish) × 2 lines.
+
+| Setup | Nearest neighbour same topic | Best other-language match same topic | Mean sim same-topic vs same-language-other-topic |
+|---|---|---|---|
+| `passage:`, raw cosine | 0.92 | 1.00 | 0.857 vs 0.858 |
+| `passage:`, centered | **1.00** | 1.00 | 0.071 vs 0.085 |
+| `query:`, raw | 0.83 | 1.00 | 0.847 vs 0.836 |
+| `query:`, centered | 0.92 | 1.00 | 0.083 vs 0.014 |
+
+Rankings are mostly right, but raw scores are dominated by language: an
+off-topic line in the same language scores as high, on average, as an
+on-topic line. So:
+
+- Vectors are **centered** on the compared set (seed + candidates, when
+  there are ≥ 5) before cosine. Scores are then min-max scaled within the
+  pool, which makes them relative within one search, never absolute.
+- `tests/test_model_quality.py` keeps this check (nearest-neighbour topic
+  accuracy ≥ 0.9). It runs locally when the model is downloaded and is
+  skipped in CI.
+- **Known limitation:** a pool that mixes languages still favours the
+  seed's language somewhat. Possible fixes later: per-language centering
+  (needs language detection, which was dropped in M2) or a larger model
+  (e5-base, ~1.1 GB). Neither is planned until real use shows it matters.
+
+**`find_similar_by_lyrics`**
+
+- **Pool:** Last.fm `track.getSimilar` (25), `tag.getTopTracks` for the
+  seed's top 2 tags (10 each), 5 similar artists × 2 top tracks, and
+  ReccoBeats recommendations (15). Sources are interleaved round-robin and
+  deduplicated by normalized artist + title, then capped at
+  `LYRICMOOD_SIMILAR_POOL_SIZE` (40). A failing source becomes an entry in
+  `missing`.
+- **Resolution:** every candidate is resolved to Spotify (§8.3).
+  ReccoBeats candidates already carry Spotify IDs and go through
+  `get_track`, so every embedded song has a row in the SQLite `tracks`
+  table.
+- **`expand_pool=false`:** ranks only songs already in the vector store
+  (earlier searches), with no network beyond the seed. The spec didn't
+  define this; this interpretation is pending the owner's confirmation.
+- **Mood blend:** `mood_weight` w gives
+  `score = (1-w)·lyrics + w·(1 - dist((valence, energy), seed)/√2)`. When
+  either side has no ReccoBeats features, the mood term is skipped rather
+  than counted as zero. The default is 0 (lyrics only, as the tool's name
+  says); the docstring tells the LLM when to raise it.
+- **Measured:** "Carnival of Rust": 39 candidates, 32 with lyrics, **55 s
+  cold** (mostly LRCLIB at 2 req/s plus ~33 songs embedded). The next
+  search took 13 s, because 7 transient LRCLIB failures were retried
+  (errors aren't cached, only real misses). Fully warm: **0.8 s**.
+  `expand_pool=false` took 1.4 s over 40 stored songs. Top result:
+  Jeff Buckley's "Broken down and hungry for your love / With no way to
+  feed it", matched against "Come feed the rain / 'Cause I'm thirsty for
+  your love".
+
+**`analyze_artists`**
+
+- Per artist: top tracks (shared `artist_top` helper, the same as
+  `get_artist_tracks`), Last.fm artist tags, ReccoBeats feature means
+  (Polars `group_by`), and per-song excerpts (opening stanza + the stanza
+  holding the most repeated line, cut to `LYRICMOOD_EXCERPT_MAX_CHARS`
+  500). Shared tags across artists are listed. 3 artists × 4 songs gave
+  ~6,400 characters of JSON.
+- **Removed: an artist-to-artist lyrics similarity score.** One was
+  prototyped (centroid cosine). With 3 artists, centering made every value
+  negative, and the ranking mostly reflected language: the two
+  English-writing bands came out "closest", the Finnish one farthest. The
+  spec didn't ask for it, and the LLM judges shared themes better from the
+  excerpts it already receives, so it was dropped instead of shipping a
+  misleading number. `analyze_artists` therefore doesn't need the
+  embeddings extra.
 
 ### 8.3 M3: candidate identity (decided: option a)
 
@@ -231,8 +327,12 @@ Spotify search each, and the dev-mode quota is shared. Options:
   top-k, then resolve only those. Cuts Spotify calls by about 5×, but the
   cache has a second key type.
 
-Recommendation: (b), with the key stored next to the Spotify ID once
-resolved.
+Option (b) was recommended at first to save Spotify calls. Working through
+an example showed it would lose what makes results good: most candidates
+would have no audio features, so the mood blend would be impossible. The
+owner chose (a). The other argument for (a), more reliable lyrics matching
+through Spotify's exact length, mostly went away once lyrics started
+matching on names (§8.1).
 
 ### 8.4 M6: `build_mood_playlist` and arcs
 

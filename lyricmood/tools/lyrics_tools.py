@@ -88,7 +88,7 @@ class TrackProfile(BaseModel):
     missing: dict[str, str] | None = None
 
 
-async def _tags(ctx: AppContext, track: Track) -> tuple[list[Tag], str | None]:
+async def track_tags(ctx: AppContext, track: Track) -> tuple[list[Tag], str | None]:
     tags = await ctx.lastfm.track_tags(track.primary_artist, track.title)
     if tags:
         return tags, "track"
@@ -104,7 +104,7 @@ async def build_profile(ctx: AppContext, track: Track) -> TrackProfile:
     lyrics_r, features_r, tags_r = await asyncio.gather(
         ctx.lrclib.find_lyrics(track),
         _features(ctx, track),
-        _tags(ctx, track),
+        track_tags(ctx, track),
         return_exceptions=True,
     )
     for result in (lyrics_r, features_r, tags_r):

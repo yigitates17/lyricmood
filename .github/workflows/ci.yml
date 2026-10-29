@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked
+      # The embeddings extra (onnxruntime, LanceDB) is installed so vector code
+      # is tested; the model itself is never downloaded in CI.
+      - run: uv sync --locked --extra embeddings
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       # Tests use recorded fixtures only; no API keys or network needed.

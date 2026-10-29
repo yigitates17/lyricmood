@@ -58,6 +58,10 @@ def status() -> None:
     table.add_row("spotify", spotify)
     table.add_row("last.fm", "configured" if settings.lastfm_api_key else "not configured")
     ctx = AppContext(settings)
+    try:
+        table.add_row("embeddings", f"installed, {ctx.vectors.count()} songs embedded")
+    except LyricmoodError:
+        table.add_row("embeddings", "not installed (`uv sync --extra embeddings`)")
     for name, count in ctx.cache.stats().items():
         table.add_row(f"cache {name}", str(count))
     ctx.cache.close()

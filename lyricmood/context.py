@@ -6,6 +6,7 @@ need it, with a message saying which key to set.
 
 from lyricmood.config import Settings, get_settings
 from lyricmood.core.cache import Cache
+from lyricmood.core.embeddings import E5Embedder, Embedder
 from lyricmood.core.errors import ConfigError
 from lyricmood.core.http import ApiClient
 from lyricmood.core.lastfm import LastfmClient
@@ -13,6 +14,7 @@ from lyricmood.core.lrclib import LrclibClient
 from lyricmood.core.reccobeats import ReccoBeatsClient
 from lyricmood.core.spotify.auth import SpotifyAuth
 from lyricmood.core.spotify.client import SpotifyClient
+from lyricmood.core.vectors import VectorStore
 
 
 class AppContext:
@@ -25,6 +27,8 @@ class AppContext:
         lrclib: LrclibClient | None = None,
         lastfm: LastfmClient | None = None,
         reccobeats: ReccoBeatsClient | None = None,
+        embedder: Embedder | None = None,
+        vectors: VectorStore | None = None,
     ):
         self.settings = settings or get_settings()
         self._cache = cache
@@ -33,6 +37,8 @@ class AppContext:
         self._lrclib = lrclib
         self._lastfm = lastfm
         self._reccobeats = reccobeats
+        self._embedder = embedder
+        self._vectors = vectors
 
     @property
     def cache(self) -> Cache:
@@ -86,6 +92,19 @@ class AppContext:
                 self.cache, user_agent=self.settings.user_agent, rps=self.settings.reccobeats_rps
             )
         return self._reccobeats
+
+    @property
+    def embedder(self) -> Embedder:
+        # Cheap to build: the model loads on the first embed() call.
+        if self._embedder is None:
+            self._embedder = E5Embedder(self.settings.models_dir)
+        return self._embedder
+
+    @property
+    def vectors(self) -> VectorStore:
+        if self._vectors is None:
+            self._vectors = VectorStore(self.settings.vectors_path, self.embedder.dim)
+        return self._vectors
 
     async def aclose(self) -> None:
         clients: list[ApiClient | None] = [

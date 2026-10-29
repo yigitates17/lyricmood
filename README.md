@@ -15,9 +15,10 @@ LLM client:
 
 Both read the same tool registry, so every tool is defined once.
 
-> **Status: milestone 2 of 7.** Spotify search, lyrics (LRCLIB), audio
-> features (ReccoBeats), Last.fm tags, artist top tracks, and the song
-> you're playing now. See [Roadmap](#roadmap).
+> **Status: milestone 3 of 7.** Spotify search, lyrics (LRCLIB), audio
+> features (ReccoBeats), Last.fm tags, artist top tracks, the song you're
+> playing now, lyrics-based similar songs, and artist comparisons. See
+> [Roadmap](#roadmap).
 
 ## Why this exists
 
@@ -41,9 +42,19 @@ you don't have it.
 ```bash
 git clone https://github.com/yigitates17/lyricmood.git
 cd lyricmood
-uv sync
+uv sync --extra embeddings   # or plain `uv sync`, see below
 cp .env.example .env
 ```
+
+**The `embeddings` extra** adds what `find_similar_by_lyrics` needs:
+ONNX Runtime, Hugging Face `tokenizers`, and LanceDB. That's about 385 MB
+on top of the base install's ~215 MB. The first similarity search also
+downloads the lyrics model,
+[`intfloat/multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small),
+once: about 480 MB, into `~/.lyricmood/models`. It runs on CPU through ONNX,
+so PyTorch is not needed. Leave the extra out if you only want lyrics
+explanations, profiles and playlists. Everything else works, and the
+similarity tool will say how to enable it.
 
 ### Spotify (required)
 
@@ -129,12 +140,16 @@ uv run lyricmood call get_lyrics track=2DtPEKs3Pj7E06EoWW4vw8
 uv run lyricmood call get_artist_tracks artist="Haloo Helsinki!" limit=5
 uv run lyricmood call now_playing                # play something on Spotify first
 uv run lyricmood call now_playing with_profile=false
+uv run lyricmood call find_similar_by_lyrics track=2DtPEKs3Pj7E06EoWW4vw8 k=8
+uv run lyricmood call find_similar_by_lyrics track=2DtPEKs3Pj7E06EoWW4vw8 mood_weight=0.4
+uv run lyricmood call find_similar_by_lyrics track="Nemo Nightwish" expand_pool=false
+uv run lyricmood call analyze_artists --json '{"artists": ["Poets of the Fall", "Nightwish"]}'
 ```
 
 `call` runs any tool directly and prints exactly the JSON an LLM would get.
 It's the quickest way to test a tool without an LLM.
 
-Your data (SQLite cache, Spotify token, and later the vector store) lives in
+Your data (SQLite cache, Spotify token, lyrics vectors, the model) lives in
 `~/.lyricmood`. It sits outside the repo on purpose: MCP clients start the
 server from whatever directory they like, and they all need to share one
 cache. Set `LYRICMOOD_DATA_DIR` to move it.
@@ -148,7 +163,8 @@ cache. Set `LYRICMOOD_DATA_DIR` to move it.
 | `get_track_profile(track)` | 2 | ✅ |
 | `get_artist_tracks(artist, limit)` | 2 | ✅ |
 | `now_playing(with_profile)` | 2 | ✅ |
-| `find_similar_by_lyrics`, `analyze_artists` | 3 | planned |
+| `find_similar_by_lyrics(track, k, expand_pool, mood_weight)` | 3 | ✅ |
+| `analyze_artists(artists, tracks_per_artist)` | 3 | ✅ |
 | `get_my_top_tracks`, `get_saved_tracks` | 4–6 | planned |
 | `create_spotify_playlist`, `update_spotify_playlist`, `build_mood_playlist` | 6 | planned |
 | `convert_playlist` | 7 | planned |
@@ -181,6 +197,42 @@ stripped before lookup. "Live" and "Orchestral Version" are kept, because
 their lyrics can differ or be missing. Lyrics are cached forever; misses are
 retried after 14 days.
 
+**`find_similar_by_lyrics`** finds songs whose lyrics are about similar
+things, across languages:
+
+1. It gathers about 40 candidates from Last.fm (similar tracks, the seed's
+   top tags, similar artists' hits) and ReccoBeats recommendations, taking
+   from each source in turn so no single one dominates.
+2. It resolves each candidate to Spotify and fetches its lyrics.
+3. It embeds the lyrics, one vector per stanza, with repeated choruses
+   counted once and the song vector being their average. Vectors are
+   stored in LanceDB, so a song is only ever embedded once.
+4. It ranks the candidates by similarity to the seed.
+
+Each result includes `matching_lines`: the two passages, one from each
+song, that matched best. `mood_weight` (0–1) also favors songs with
+similar valence and energy. `expand_pool=false` skips the network and ranks
+only songs analyzed in earlier searches.
+
+Scores are relative within one search (the best match is 1.0), not
+absolute. The first search for a song takes about a minute (mostly
+LRCLIB, which is rate-limited politely); repeats take under a second.
+
+Known limitation: the model groups lyrics partly by language. An English
+song about loss can score close to an English party song. In a mixed
+English/Finnish test, the nearest neighbour was always the right topic,
+but scores aren't comparable across languages. See
+[DESIGN §8.2](docs/DESIGN.md).
+
+**`analyze_artists`** samples each artist's top songs and returns:
+
+- lyric excerpts (opening stanza plus chorus, about 500 characters each)
+- average valence, energy, danceability and acousticness
+- Last.fm tags, plus the tags the artists share
+
+The LLM reads the excerpts to find the common themes behind "why do I like
+these?". It doesn't need the embeddings extra.
+
 ### Adding a tool
 
 Put a module in `lyricmood/tools/`. Modules there are discovered
@@ -212,9 +264,15 @@ get those clients from `ctx`.
 ## Development
 
 ```bash
+uv sync --extra embeddings
 uv run pytest            # offline: HTTP is mocked with respx + JSON fixtures
 uv run ruff check . && uv run ruff format --check .
 ```
+
+Similarity tests use a fake word-overlap embedder, so they're instant and
+need no model. `tests/test_model_quality.py` checks the real model on a
+small invented English/Finnish topic set. It runs only when the model is
+already downloaded, so CI skips it.
 
 CI runs the same commands and never calls a real API. LRCLIB, Last.fm and
 ReccoBeats fixtures in `tests/fixtures/` are recorded responses with images
@@ -243,7 +301,7 @@ behind it, and open questions.
 
 1. ✅ Skeleton, config, SQLite cache, Spotify OAuth, `search_track`
 2. ✅ LRCLIB, Last.fm and ReccoBeats clients, `get_lyrics`, `get_track_profile`, `get_artist_tracks`, `now_playing`
-3. Embeddings (multilingual-e5-small) + LanceDB, `find_similar_by_lyrics`, `analyze_artists`
+3. ✅ Embeddings (multilingual-e5-small via ONNX) + LanceDB, `find_similar_by_lyrics`, `analyze_artists`
 4. MCP server exposing all tools
 5. LiteLLM terminal chat, plus `lyricmood watch`, which summarizes each new song as it starts playing
 6. Playlist create/update, `build_mood_playlist`

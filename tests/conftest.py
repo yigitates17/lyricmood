@@ -106,3 +106,45 @@ async def full_ctx(settings, cache, spotify, lrclib, lastfm, reccobeats) -> AppC
     return AppContext(
         settings, cache=cache, spotify=spotify, lrclib=lrclib, lastfm=lastfm, reccobeats=reccobeats
     )
+
+
+class FakeEmbedder:
+    """Bag-of-words vectors: texts sharing words are similar. Deterministic,
+    instant, and needs no model download."""
+
+    model_id = "fake-bow"
+    dim = 64
+
+    def embed(self, texts):
+        import zlib
+
+        import numpy as np
+
+        out = np.zeros((len(texts), self.dim), dtype=np.float32)
+        for row, text in enumerate(texts):
+            for word in text.lower().split():
+                out[row, zlib.crc32(word.strip(".,!?").encode()) % self.dim] += 1
+        norms = np.linalg.norm(out, axis=1, keepdims=True)
+        return out / np.where(norms == 0, 1, norms)
+
+
+@pytest.fixture
+def vectors(tmp_path):
+    pytest.importorskip("lancedb")
+    from lyricmood.core.vectors import VectorStore
+
+    return VectorStore(tmp_path / "vectors", FakeEmbedder.dim)
+
+
+@pytest.fixture
+async def sim_ctx(settings, cache, spotify, lrclib, lastfm, reccobeats, vectors) -> AppContext:
+    return AppContext(
+        settings,
+        cache=cache,
+        spotify=spotify,
+        lrclib=lrclib,
+        lastfm=lastfm,
+        reccobeats=reccobeats,
+        embedder=FakeEmbedder(),
+        vectors=vectors,
+    )

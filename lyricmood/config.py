@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     # Lyrics sent to the LLM are cut at a stanza boundary below this length.
     # The full text stays in the cache.
     lyrics_max_chars: int = Field(default=2500, alias="LYRICMOOD_LYRICS_MAX_CHARS")
+    # Per-song sample size in analyze_artists (opening stanza + chorus).
+    excerpt_max_chars: int = Field(default=500, alias="LYRICMOOD_EXCERPT_MAX_CHARS")
+
+    # How many candidate songs find_similar_by_lyrics gathers before ranking.
+    # Each new candidate costs ~1 Spotify search and 1-2 LRCLIB calls once;
+    # everything is cached afterwards.
+    similar_pool_size: int = Field(default=40, alias="LYRICMOOD_SIMILAR_POOL_SIZE")
 
     @property
     def resolved_data_dir(self) -> Path:
@@ -68,6 +75,14 @@ class Settings(BaseSettings):
     @property
     def cache_path(self) -> Path:
         return self.resolved_data_dir / "cache.sqlite3"
+
+    @property
+    def models_dir(self) -> Path:
+        return self.resolved_data_dir / "models"
+
+    @property
+    def vectors_path(self) -> Path:
+        return self.resolved_data_dir / "vectors"
 
     @property
     def spotify_token_path(self) -> Path:

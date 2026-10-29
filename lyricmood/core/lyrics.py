@@ -60,3 +60,18 @@ def stats(text: str) -> LyricsStats:
         unique_word_ratio=round(len(set(words)) / len(words), 2) if words else 0.0,
         repeated_lines=repeated,
     )
+
+
+def excerpt(text: str, max_chars: int) -> str:
+    """A short sample of a song: the opening stanza, plus the chorus (the
+    stanza containing the most-repeated line) when it is a different one."""
+    parts = stanzas(text)
+    if not parts:
+        return ""
+    chosen = [parts[0]]
+    repeated = stats(text).repeated_lines
+    if repeated:
+        chorus = next((s for s in parts if repeated[0] in s), None)
+        if chorus and chorus != parts[0]:
+            chosen.append(chorus)
+    return truncate("\n\n".join(chosen), max_chars)[0]
