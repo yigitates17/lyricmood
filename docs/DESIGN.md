@@ -249,14 +249,15 @@ resolved.
   a Spotify search (`isrc:` doesn't help, since the source has no ISRC).
   Spotify → YouTube: `search.list` at 100 units per track. With inserts at
   50, a 50-track playlist costs about 7,500 of the 10,000 daily units.
-- **Matching rule (proposal; decide at M7)**: names are the main signal,
-  with duration as a sanity check, unlike lyrics. A wrong *recording* is
+- **Matching rule (decided)**: match by name and prefer the closest
+  length. Duration never rejects a match on its own, but unlike lyrics it
+  is still worth checking. A wrong *recording* is
   something you hear: YouTube results for "Nightwish Nemo" include the
   official video with a long intro, live shows, sped-up and nightcore
-  edits, covers and 1-hour loops, all with nearly the same name. Proposal:
-  rank by name similarity, prefer the closest length, and send large
-  mismatches (more than ~15 s) to the "please check" report instead of
-  silently adding them. ytmusicapi's "songs" filter returns the album
+  edits, covers and 1-hour loops, all with nearly the same name. So:
+  rank by name similarity and pick the closest length. **Open:** whether
+  large mismatches (more than ~15 s) should also be listed in the "please
+  check" report. ytmusicapi's "songs" filter returns the album
   recordings, with clean artist/title/duration, which avoids most of this.
 - Resumable transfers: keep a `transfers` table (source, target, item index,
   status, matched ID). Each run continues from the first unfinished item.
